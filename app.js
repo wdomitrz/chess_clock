@@ -8,6 +8,7 @@ const secondsInput = document.getElementById("seconds");
 const backButton = document.getElementById("back-button");
 const incrementMinutesInput = document.getElementById("increment-minutes");
 const incrementSecondsInput = document.getElementById("increment-seconds");
+const incrementTypeSelect = document.getElementById("increment-type");
 
 const playerDivs = [
   document.getElementById("player-0"),
@@ -27,15 +28,26 @@ let remainingTimes = [300000, 300000]; // milliseconds
 let isRunning = false;
 let wakeLock = null;
 let incrementMs = 0;
+let incrementType = "fischer";
+let remainingTimeAtTheStartOfMove = 0;
 
 // --- Functions ---
 function formatTime(ms) {
-  const m = Math.floor(ms / 60000)
-    .toString()
-    .padStart(2, "0");
+  let m = Math.floor(ms / 60000);
   const seconds = ((ms % 60000) / 1000).toFixed(1).padStart(4, "0"); // e.g. "59.8"
   const [s, dec] = seconds.split(".");
-  return `${m}:${s}.${dec}`;
+  const h = Math.floor(m / 60);
+  m = m % 60;
+  const m_str = m.toString().padStart(2, "0");
+  if (h > 0) {
+    return `${h}:${m_str}:${s}`;
+  } else {
+    if (m >= 5) {
+      return `${m}:${s}`;
+    } else {
+      return `${m}:${s}.${dec}`;
+    }
+  }
 }
 
 function updateActivePlayerStyle() {
@@ -62,6 +74,8 @@ function startTurn(player) {
   const start = performance.now();
   const initialRemaining = remainingTimes[player];
 
+  remainingTimeAtTheStartOfMove = initialRemaining;
+
   timers[player] = setInterval(() => {
     const elapsed = performance.now() - start;
     const newRemaining = initialRemaining - elapsed;
@@ -87,12 +101,20 @@ function startTurn(player) {
 function switchPlayer() {
   if (!isRunning) return;
 
-  // Add increment to the current player before switching
-  remainingTimes[currentPlayer] += incrementMs;
+  if (incrementType === "bronstein") {
+    // Add back the time spent, up to the increment
+    remainingTimes[currentPlayer] = Math.min(
+      remainingTimes[currentPlayer] + incrementMs,
+      remainingTimeAtTheStartOfMove
+    );
+  } else {
+    // Standard Fischer increment: always add full increment
+    remainingTimes[currentPlayer] += incrementMs;
+  }
 
   currentPlayer = currentPlayer === 0 ? 1 : 0;
   updateActivePlayerStyle();
-  updateDisplay(); // Update immediately after increment
+  updateDisplay();
 
   startTurn(currentPlayer);
 }
@@ -106,6 +128,8 @@ function startGame() {
   incrementMs = (incMin * 60 + incSec) * 1000;
 
   const ms = (h * 3600 + m * 60 + s) * 1000;
+
+  incrementType = incrementTypeSelect.value;
 
   remainingTimes = [ms, ms];
   playerDivs.forEach((div) => {

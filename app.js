@@ -183,7 +183,7 @@ async function releaseWakeLock() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && isRunning) {
+  if (document.visibilityState === "visible") {
     enableWakeLock();
   }
 });

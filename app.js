@@ -41,12 +41,10 @@ function formatTime(ms) {
   const m_str = m.toString().padStart(2, "0");
   if (h > 0) {
     return `${h}:${m_str}:${s}`;
+  } else if (m > 0) {
+    return `${m}:${s}`;
   } else {
-    if (m >= 5) {
-      return `${m}:${s}`;
-    } else {
-      return `${m}:${s}.${dec}`;
-    }
+    return `${s}.${dec}`;
   }
 }
 

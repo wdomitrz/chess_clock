@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>Chess Clock</title>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icon.svg" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+
+  <body class="bg-gray-900 text-white">
+    <!-- Setup Screen -->
+    <div
+      id="setup-screen"
+      class="flex flex-col items-center justify-center h-screen p-4"
+    >
+      <h1 class="text-4xl font-bold mb-8">Chess Clock</h1>
+
+      <div class="w-full max-w-sm space-y-6">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label
+              for="hours"
+              class="block text-lg font-medium text-gray-300 mb-2"
+              >Hours</label
+            >
+            <input
+              type="number"
+              id="hours"
+              min="0"
+              value="0"
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label
+              for="minutes"
+              class="block text-lg font-medium text-gray-300 mb-2"
+              >Minutes</label
+            >
+            <input
+              type="number"
+              id="minutes"
+              min="0"
+              max="59"
+              value="5"
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label
+              for="seconds"
+              class="block text-lg font-medium text-gray-300 mb-2"
+              >Seconds</label
+            >
+            <input
+              type="number"
+              id="seconds"
+              min="0"
+              max="59"
+              value="0"
+              class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+        </div>
+        <div>
+          <label
+            for="increment-minutes"
+            class="block text-lg font-medium text-gray-300 mb-2"
+            >Increment Minutes</label
+          >
+          <input
+            type="number"
+            id="increment-minutes"
+            min="0"
+            max="59"
+            value="0"
+            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+        <div>
+          <label
+            for="increment-seconds"
+            class="block text-lg font-medium text-gray-300 mb-2"
+            >Increment Seconds</label
+          >
+          <input
+            type="number"
+            id="increment-seconds"
+            min="0"
+            max="59"
+            value="0"
+            class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+
+        <button
+          id="start-game"
+          class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg text-xl transition-colors"
+        >
+          Start
+        </button>
+      </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="hidden grid grid-rows-2 h-screen">
+      <div
+        id="player-0"
+        class="player flex items-center justify-center text-5xl font-bold cursor-pointer select-none"
+      >
+        <span class="rotate-90 block">05:00</span>
+      </div>
+      <div
+        id="player-1"
+        class="player flex items-center justify-center text-5xl font-bold cursor-pointer select-none"
+      >
+        <span class="rotate-90 block">05:00</span>
+      </div>
+    </div>
+
+    <!-- Container for Back and Pause buttons -->
+    <div
+      class="absolute inset-0 pointer-events-none flex flex-col items-center justify-center space-y-16"
+    >
+      <!-- Back button rotated and centered -->
+      <div id="buttons" class="hidden">
+        <!-- Pause/Resume button rotated and centered -->
+        <button
+          id="pause-resume"
+          class="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-2 px-4 rounded-lg transform rotate-90 pointer-events-auto"
+        >
+          Pause
+        </button>
+        <button
+          id="back-button"
+          class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transform rotate-90 pointer-events-auto"
+        >
+          Back
+        </button>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

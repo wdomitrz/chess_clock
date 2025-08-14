@@ -65,7 +65,7 @@ function updateDisplay() {
   }
 }
 
-function startTurn(player) {
+function resumeTurn(player) {
   clearInterval(timers[0]);
   clearInterval(timers[1]);
 
@@ -73,8 +73,6 @@ function startTurn(player) {
 
   const start = performance.now();
   const initialRemaining = remainingTimes[player];
-
-  remainingTimeAtTheStartOfMove = initialRemaining;
 
   timers[player] = setInterval(() => {
     const elapsed = performance.now() - start;
@@ -96,6 +94,11 @@ function startTurn(player) {
 
     updateDisplay();
   }, 100); // update every 50ms
+}
+
+function startTurn(player) {
+  remainingTimeAtTheStartOfMove = remainingTimes[player];
+  resumeTurn(player);
 }
 
 function switchPlayer() {
@@ -156,7 +159,7 @@ function pauseResume() {
     pauseResumeButton.textContent = "Resume";
   } else {
     isRunning = true;
-    startTurn(currentPlayer);
+    resumeTurn(currentPlayer);
     pauseResumeButton.textContent = "Pause";
   }
 }

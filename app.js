@@ -30,6 +30,7 @@ let wakeLock = null;
 let incrementMs = 0;
 let incrementType = "fischer";
 let remainingTimeAtTheStartOfMove = 0;
+let gameStarted = false;
 
 // --- Functions ---
 function formatTime(ms) {
@@ -121,6 +122,9 @@ function switchPlayer() {
 }
 
 function startGame() {
+  gameStarted = true;
+  enableWakeLock();
+
   const h = parseInt(hoursInput.value, 10) || 0;
   const m = parseInt(minutesInput.value, 10) || 0;
   const s = parseInt(secondsInput.value, 10) || 0;
@@ -164,11 +168,18 @@ function pauseResume() {
 
 // --- Wake Lock ---
 async function enableWakeLock() {
-  try {
-    wakeLock = await navigator.wakeLock.request("screen");
-  } catch (err) {
-    console.warn("Wake lock failed", err);
+  if (gameStarted) {
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+    } catch (err) {}
   }
+}
+
+async function releaseWakeLock() {
+  if (wakeLock === null) return;
+  try {
+    wakeLock.release();
+  } catch (err) {}
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -204,6 +215,9 @@ playerDivs[1].addEventListener("click", () => {
 pauseResumeButton.addEventListener("click", pauseResume);
 
 backButton.addEventListener("click", () => {
+  gameStarted = false;
+  releaseWakeLock();
+
   // Stop timers
   clearInterval(timers[0]);
   clearInterval(timers[1]);

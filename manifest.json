@@ -1,0 +1,13 @@
+{
+  "name": "Chess Clock",
+  "short_name": "Chess Clock",
+  "start_url": ".",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

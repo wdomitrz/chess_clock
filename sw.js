@@ -5,6 +5,7 @@ const FILES = [
   "./icon.svg",
   "./index.html",
   "./manifest.json",
+  "./tw.css",
 ];
 
 self.addEventListener("install", (event) => {

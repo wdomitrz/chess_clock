@@ -2,5 +2,5 @@
   "name": "Chess Clock",
   "start_url": ".",
   "display": "standalone",
-  "icons": [{ "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml" }]
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

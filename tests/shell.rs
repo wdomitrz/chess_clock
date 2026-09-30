@@ -895,8 +895,9 @@ fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
         .collect();
     assert_eq!(
         rotations.len(),
-        3,
-        "three elements are rotated (both readings and the buttons); found {rotations:?}"
+        2,
+        "two rules are rotated: the shared reading rule and the buttons; \
+         found {rotations:?}"
     );
     assert!(
         rotations.iter().all(|r| r.contains("transform: rotate(")),
@@ -927,66 +928,61 @@ fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
         );
     }
 
-    // The panel-specific rules must both exist and must disagree.
+    // One rotation for the readings, one for the buttons: two in total, both
+    // 90deg. Not three, and not a pair of opposite angles.
     //
-    // Note what this test previously did *not* check: it asserted the two
-    // rotations differ, and was content with that. So it passed on a build
-    // where they were the right angles for facing *inward*, which is what
-    // shipped. "Opposite" is necessary and not sufficient — the question is
-    // which one faces out, and that is now asserted directly.
-    let panel_rotation = |panel: &str| -> Option<i64> {
-        let marker = format!("#{panel} .reading {{");
+    // Getting here took three attempts, and the wrong ones are worth recording:
+    //
+    //   * The author's original at `006f70c` gave BOTH spans `.rotate-90`
+    //     (`rotate: 90deg`) and both buttons `.rotate-90`. Four elements, one
+    //     rotation, facing left.
+    //   * This rewrite first rotated each element by both `rotate` and
+    //     `transform`, which composes into 180deg -- upside down.
+    //   * It then "fixed" that into OPPOSITE angles, 90 on the top panel and
+    //     270 on the bottom, on a theory that the two clocks should face
+    //     outward from the device's centre. That theory was invented here and
+    //     not read off the original, and it was wrong: the original turns both
+    //     the same way. Two of its own tests had to be weakened into shape
+    //     checks ("the rotations differ") to accommodate it.
+    //   * So there is now one 90deg on the shared `.reading` selector, and the
+    //     buttons match.
+    //
+    // Measured against the unmodified original in Chromium: both of its
+    // readings compute `rotate: 90deg`; the tops of the glyphs point screen
+    // right, so you tilt your head LEFT to read it -- the text faces left.
+    let reading_rule = |sel: &str| -> Option<i64> {
+        let marker = format!("{sel} {{");
         let at = code.find(&marker)?;
         let tail = &code[at + marker.len()..];
-        let end = tail.find('}')?;
-        let block = &tail[..end];
+        let block = &tail[..tail.find('}')?];
         let rotate = block.find("rotate(")?;
         let value = &block[rotate + "rotate(".len()..];
         let end_deg = value.find("deg)")?;
         value[..end_deg].parse().ok()
     };
 
-    let top = panel_rotation("panel-0").expect("#panel-0 .reading must set a rotation");
-    let bottom = panel_rotation("panel-1").expect("#panel-1 .reading must set a rotation");
-    assert_ne!(
-        top, bottom,
-        "the two readings must turn opposite ways, or both players read the same \
-         direction and one of them is reading upside down"
+    let readings = reading_rule(".panel .reading")
+        .expect(".panel .reading must set the rotation; one shared rule covers both panels");
+    assert_eq!(
+        readings, 90,
+        "the readings are turned 90deg, as in the author's original, which leaves \
+         the text facing left -- you tilt your head left to read it"
     );
 
-    // Outward, specifically. Measured in Chromium by taking a `Range` over the
-    // first character of each reading and seeing where that glyph lands inside
-    // its own panel:
-    //
-    //   #panel-0, 270deg, panel spans y 493..740, first glyph y 666..716
-    //       -> the first digit is at the BOTTOM of the panel, so the reading
-    //          runs upward: out of the device's centre, toward the player at
-    //          the top edge.
-    //   #panel-1, 90deg,  panel spans y 740..986, first glyph y 763..813
-    //       -> the first digit is at the TOP of the panel, so the reading runs
-    //          downward: out of the centre, toward the player at the bottom.
-    //
-    // Getting this backwards is not subtle to a user and was not subtle to
-    // measurement either: the previous build had 90 on the top panel and 270 on
-    // the bottom, which put the first digit at the outer edge of each panel and
-    // pointed the two readings at one another across the table.
-    assert_eq!(
-        top, 270,
-        "the top panel's reading must run upward, away from the device's centre"
-    );
-    assert_eq!(
-        bottom, 90,
-        "the bottom panel's reading must run downward, away from the device's centre"
-    );
-
-    // The buttons sit on the midline, so they are nobody's own and take the top
-    // panel's direction.
-    let buttons = code.find("#controls button {").expect("the controls rule");
-    let tail = &code[buttons + "#controls button {".len()..];
-    let block = &tail[..tail.find('}').expect("a closed block")];
+    // And no per-panel override may reintroduce a second angle: both panels
+    // share one rotation, exactly as they do in the original.
     assert!(
-        block.contains("rotate(270deg)"),
-        "the buttons are centred on the midline and turn with the top panel"
+        !code.contains("#panel-0 .reading") && !code.contains("#panel-1 .reading"),
+        "both panels share one rotation, as in the original; a per-panel rule is \
+         how the readings came to be turned in opposite directions"
+    );
+
+    let buttons_at = code.find("#controls button {").expect("the controls rule");
+    let tail = &code[buttons_at + "#controls button {".len()..];
+    let button_block = &tail[..tail.find('}').expect("a closed block")];
+    assert!(
+        button_block.contains("rotate(90deg)"),
+        "the buttons are turned the same way as the readings, as in the original"
     );
 }
 

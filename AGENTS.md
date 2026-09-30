@@ -272,18 +272,17 @@ because they all called `settle_increment` themselves and never consulted what
 The lesson for the other five repos: a green suite and a green build prove the
 *parts* are right, and this is a whole app failing to start. Load it.
 
-## Orientation: the readings face outward, and turn exactly once
+## Orientation: both readings face left, exactly as the original
 
-Two defects, both invisible to every test and to a screenshot taken at a
-glance. They were found by measuring the rendered geometry in a browser and
-then looking at the picture.
+Three attempts, two of them wrong, and the lesson is about where the
+authority is.
 
-**Never set both `rotate` and `transform` on one element.** They are two
-independent transform functions and a browser *composes* them. This set
-`rotate: 90deg` and `transform: rotate(90deg)` on the readings, "for a
-browser that only knows the old one" — so every reading rendered at **180°**,
-upside down rather than rotated. Measured in Chromium on a 200×40 box with a
-marker on its left edge:
+**One rotation per element.** The original Tailwind build set one property
+(`rotate: 90deg`). This rewrite first set both `rotate: 90deg` and
+`transform: rotate(90deg)` on the readings, "for a browser that only knows the
+old one" — they are two independent transform functions and a browser composes
+them, so the readings rendered at **180°**, upside down. Measured in Chromium
+on a 200×40 box with a marker on its left edge:
 
 | declaration | marker lands at | angle |
 |---|---|---|
@@ -291,57 +290,53 @@ marker on its left edge:
 | `rotate: 90deg` | (80, −80) | 90° |
 | **both** | **(180, 0)** | **180°** |
 
-The original Tailwind build set one property, and the fallback bought nothing
-— `transform: rotate()` is understood by every browser that ever ran this app.
-Only `transform` is used now: it is the spelling that works in browsers without
-the independent `rotate`/`translate` properties (Safari before 14.1), which is
-the real reason to prefer it over the newer one.
+The fallback bought nothing: `transform: rotate()` works everywhere the app has
+ever run. Only `transform` is used now, which is also the spelling that
+survives browsers without the independent `rotate` property (Safari before
+14.1).
 
-**The two panels must turn in opposite directions, and the direction has to be
-measured.** Rotating both the same way points them at each other across the
-table. But making them opposite is not sufficient: the first attempt had the
-top panel at 90deg and the bottom at 270deg, which is the pair of angles that
-looks obviously "rotated", and it pointed both readings *inward* — each began
-at the outer edge of its own panel and ran towards the device's centre. The
-user reported it twice before I measured it rather than reasoned about it.
+**Both readings are turned the same way, and they face left.** The second
+attempt made them *opposite* — 90° on the top panel and 270° on the bottom —
+because the two players sit on opposite edges of a device lying flat, so the
+clocks "should face outward from the centre line". That reasoning was
+**invented here rather than read off the original**, and it was wrong. At
+`006f70c` both spans carry the same class:
 
-Measured, in Chromium, by taking a `Range` over the first character of each
-reading and asking where that glyph lands inside its own panel. That is the
-whole test: not "what angle is it", but "which way does the first digit sit".
+```html
+<span class="rotate-90 block">05:00</span>
+<span class="rotate-90 block">05:00</span>
+```
 
-| panel | rotation | panel spans (y) | first glyph (y) | reads |
-|---|---|---|---|---|
-| `#panel-0` (top) | `270deg` | 493–740 | 666–716 | bottom → top, **outward** |
-| `#panel-1` (bottom) | `90deg` | 740–986 | 763–813 | top → bottom, **outward** |
+One rotation, four elements (two readings, two buttons), all facing left.
 
-So the top panel's first digit sits at the *bottom* of its panel and the
-bottom panel's at the *top*: each reading starts at the centre line and runs
-outward, along the phone's length, away from the other player. The buttons sit
-on the midline, belong to neither player, and take the top panel's direction.
+"Face left" is the direction you tilt your head to read it, so the tops of the
+glyphs point screen-right. Measured on the unmodified original in Chromium:
+both readings compute `rotate: 90deg`, the tops of the glyphs point right, so
+you tilt your head left. The build as shipped now measures identically, on all
+four elements:
 
-The base `.panel .reading` rule deliberately sets **no** rotation; each
-`#panel-* .reading` sets exactly one, so there is no rule to override or
-cascade.
+| element | transform | direction |
+|---|---|---|
+| `#reading-0`, `#reading-1` | `matrix(0, 1, -1, 0, 0, 0)` | faces left |
+| `#pause`, `#back` | `matrix(0, 1, -1, 0, 0, 0)` | faces left |
 
-Both are pinned by `the_readings_turn_outward_and_never_by_both_properties_at_once`
-and `the_game_screen_puts_panel_zero_first`, each verified to fail when the bug
-is reintroduced.
+The rule is a single `transform: rotate(90deg)` on the shared `.panel .reading`
+selector — there is no per-panel rule at all, and
+`the_readings_turn_outward_and_never_by_both_properties_at_once` asserts both
+facts, and fails if a per-panel override reappears.
 
-Two things about those tests are worth keeping, because both were wrong first:
+**The method note, which is the actual lesson.** Three times this was settled
+by argument before it was settled by measurement, and the argument was wrong
+each time. The original app is in the repository's own history at `006f70c`; it
+could have been read, run and measured from the first report instead of
+inferred. When a task is a port, the thing being ported is the specification.
+An invariant invented to make a bug look principled is a bug with a comment on
+it.
 
-* The double-rotation check originally compared the two properties within a
-  block in a way a later declaration always satisfied. It passed while the
-  bug was present. It now looks for each property independently.
-* The direction check originally asserted only that the two rotations *differ*
-  — and so it passed on the inward build that shipped. It now asserts the
-  values: 270 on the top panel, 90 on the bottom, with the measured
-  first-glyph positions in the comment above as the reason.
-
-The general point is the same one the startup bugs taught, and it is worth
-stating once: **a test that has never been seen to fail is not evidence.** Every
-regression test here was checked by reintroducing the exact defect and watching
-it go red, and two of them did not, and both of those were fixed because of
-that rather than in spite of it.
+Two of this file's tests had to be weakened into shape checks ("the two
+rotations differ") to accommodate the wrong version, and both passed while
+their bug was live. Every regression test here is now verified by
+reintroducing the exact defect and watching it go red.
 
 ## Startup
 
@@ -366,8 +361,9 @@ failure than an opaque `unreachable`, and it is a failure someone can act on.
 - `ui.html`: the static shell. One inline `<style>` with the original's
   colours as custom properties, one `<script type="module">` whose body is the
   dynamic import of the generated bindings. Rust owns everything dynamic. The
-  two panel rotations are the one piece of layout that is not copyable text —
-  see "Orientation" above.
+  readings' rotation is the one piece of layout that had to be measured rather
+  than reasoned about — see "Orientation" above, and read it before changing
+  it.
 - `service-worker.js`: caches only a fixed app-shell allowlist, scope-specific
   content-versioned cache, atomic install, no `skipWaiting`, so an update
   cannot swap the wasm under a live game.

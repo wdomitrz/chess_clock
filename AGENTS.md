@@ -297,21 +297,51 @@ Only `transform` is used now: it is the spelling that works in browsers without
 the independent `rotate`/`translate` properties (Safari before 14.1), which is
 the real reason to prefer it over the newer one.
 
-**The two panels must turn in opposite directions.** Rotating both the same way
-makes them face each other across the table — the mirror of what a two-sided
-clock is for, and wrong for a player who has to turn their head to read their
-own time. With the phone flat on the table, the top edge faces the player above
-it and the bottom edge the player below, so each reading turns *away* from the
-device's midline: `#panel-0` (first row) `90deg`, `#panel-1` (second row)
-`270deg`. The buttons are centred on the midline, belong to neither player, and
-take the top panel's direction.
+**The two panels must turn in opposite directions, and the direction has to be
+measured.** Rotating both the same way points them at each other across the
+table. But making them opposite is not sufficient: the first attempt had the
+top panel at 90deg and the bottom at 270deg, which is the pair of angles that
+looks obviously "rotated", and it pointed both readings *inward* — each began
+at the outer edge of its own panel and ran towards the device's centre. The
+user reported it twice before I measured it rather than reasoned about it.
+
+Measured, in Chromium, by taking a `Range` over the first character of each
+reading and asking where that glyph lands inside its own panel. That is the
+whole test: not "what angle is it", but "which way does the first digit sit".
+
+| panel | rotation | panel spans (y) | first glyph (y) | reads |
+|---|---|---|---|---|
+| `#panel-0` (top) | `270deg` | 493–740 | 666–716 | bottom → top, **outward** |
+| `#panel-1` (bottom) | `90deg` | 740–986 | 763–813 | top → bottom, **outward** |
+
+So the top panel's first digit sits at the *bottom* of its panel and the
+bottom panel's at the *top*: each reading starts at the centre line and runs
+outward, along the phone's length, away from the other player. The buttons sit
+on the midline, belong to neither player, and take the top panel's direction.
+
+The base `.panel .reading` rule deliberately sets **no** rotation; each
+`#panel-* .reading` sets exactly one, so there is no rule to override or
+cascade.
 
 Both are pinned by `the_readings_turn_outward_and_never_by_both_properties_at_once`
 and `the_game_screen_puts_panel_zero_first`, each verified to fail when the bug
-is reintroduced. Worth noting the first version of that test *did not* catch
-the double-rotation bug — it compared the two properties within a block in a way
-that a later declaration always satisfied — which is a fair argument for
-checking that a regression test actually fails on the bug it is for.
+is reintroduced.
+
+Two things about those tests are worth keeping, because both were wrong first:
+
+* The double-rotation check originally compared the two properties within a
+  block in a way a later declaration always satisfied. It passed while the
+  bug was present. It now looks for each property independently.
+* The direction check originally asserted only that the two rotations *differ*
+  — and so it passed on the inward build that shipped. It now asserts the
+  values: 270 on the top panel, 90 on the bottom, with the measured
+  first-glyph positions in the comment above as the reason.
+
+The general point is the same one the startup bugs taught, and it is worth
+stating once: **a test that has never been seen to fail is not evidence.** Every
+regression test here was checked by reintroducing the exact defect and watching
+it go red, and two of them did not, and both of those were fixed because of
+that rather than in spite of it.
 
 ## Startup
 

@@ -733,6 +733,110 @@ fn no_visible_text_names_the_implementation() {
     }
 }
 
+/// The two readings must turn in OPPOSITE directions, and neither element may
+/// set both `rotate` and `transform`.
+///
+/// Both were wrong at once, and a screenshot was the only thing that showed
+/// either:
+///
+/// * **The double rotation.** The original Tailwind build set one property
+///   (`rotate: 90deg`). This set both `rotate: 90deg` and
+///   `transform: rotate(90deg)`, "for a browser that only knows the old
+///   one". They are two independent transform functions and a browser
+///   composes them, so the readings rendered at **180°** — upside down, not
+///   rotated. Measured in Chromium on a 200x40 box with a marker on its left
+///   edge: `transform:rotate(90deg)` alone puts the marker at (80, -80);
+///   `rotate:90deg` alone at (80, -80); both together at (180, 0).
+/// * **The direction.** Rotating both panels the same way makes them face
+///   each other across the table, which is the mirror of what a two-sided
+///   clock is for. With the phone flat, the top edge faces the player above
+///   it and the bottom edge the player below, so the readings have to turn
+///   away from the device's midline — opposite ways.
+#[test]
+fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
+    let page = shell();
+    let code = strip_comments(&page);
+
+    // Exactly three rotations: the top reading, the bottom reading, the
+    // buttons. One per element, and the two panels must differ.
+    let rotations: Vec<&str> = code
+        .match_indices("transform: rotate(")
+        .map(|(at, _)| {
+            code[at..]
+                .find("deg)")
+                .map(|end| &code[at..at + end + 4])
+                .unwrap_or("")
+        })
+        .collect();
+    assert_eq!(
+        rotations.len(),
+        3,
+        "three elements are rotated (both readings and the buttons); found {rotations:?}"
+    );
+    assert!(
+        rotations.iter().all(|r| r.contains("transform: rotate(")),
+        "every rotation must be a transform"
+    );
+
+    // No element may set `rotate:` and `transform: rotate` together: they are
+    // two independent transform functions and a browser composes them, so two
+    // 90s make a 180 and the element ends up upside down.
+    //
+    // Compared per *declaration block*, splitting on `}` — the previous
+    // version split on the same character but required `!contains("transform:")`
+    // on the same chunk, which a declaration block always satisfies by the
+    // time the second property appears... it did not, and the bug slipped
+    // through: reintroducing the bug kept this test green. So the two
+    // properties are now looked for independently, in one pass over every
+    // block, and a block containing both fails.
+    for rule in code.split('}') {
+        let has_individual_rotate = rule.lines().any(|line| {
+            let line = line.trim();
+            line.starts_with("rotate:") && line.ends_with(';')
+        });
+        let has_transform_rotate = rule.contains("transform: rotate(");
+        assert!(
+            !(has_individual_rotate && has_transform_rotate),
+            "a rule sets both `rotate` and `transform: rotate`; they compose and \
+             the element turns twice as far as intended: {rule}"
+        );
+    }
+
+    // The panel-specific rule must exist and must be the *other* direction
+    // from the default. `#panel-1` is the second row, so it is the panel the
+    // player at the bottom edge is looking at.
+    assert!(
+        code.contains("#panel-1 .reading"),
+        "the second row must have its own rotation, or both readings face the \
+         same way and the players read across the table at each other"
+    );
+    let top = rotations[0];
+    let bottom = rotations[1];
+    assert_ne!(
+        top, bottom,
+        "the two readings must turn opposite ways to face outward"
+    );
+}
+
+/// The rotation is the whole point of the two-panel layout, so the panel order
+/// is load-bearing: the first row is the player at the top edge.
+#[test]
+fn the_game_screen_puts_panel_zero_first() {
+    let page = shell();
+    let first = page.find("id=\"panel-0\"").expect("panel-0");
+    let second = page.find("id=\"panel-1\"").expect("panel-1");
+    assert!(
+        first < second,
+        "panel-0 must be the first row; the rotation depends on which edge of \
+         the device each player is sitting at"
+    );
+    let buttons = page.find("id=\"controls\"").expect("the controls");
+    assert!(
+        second < buttons,
+        "the controls are centred between the panels"
+    );
+}
+
 /// The `apple-mobile-web-app-capable` meta is deprecated and Chromium logs a
 /// warning for it on every load. The current spelling is equivalent.
 #[test]

@@ -22,17 +22,23 @@ pub use clock::{format_time, Game, Increment, Millis, Phase, Player, Settings};
 #[cfg(target_arch = "wasm32")]
 mod ui;
 
-/// The entry point the page's one-line loader calls.
+/// The entry point: the shell's one loader line imports the bindings, and
+/// this runs as the module is instantiated.
 ///
-/// It is `#[wasm_bindgen(start)]` rather than an exported `start()` the shell
-/// would have to find and call: the page then does exactly one thing, import
-/// the bindings, and the app starts itself. See `ui.html`.
+/// The attribute stays, deliberately. It means the app starts without the
+/// page having to find and call anything, and — more importantly — that a
+/// panic here surfaces as a rejected import the shell's `.catch` can report,
+/// rather than as a silent half-mounted app. What it must *not* do is touch
+/// the DOM: instantiation happens before the document is parsed, so every
+/// `get_element_by_id` would find nothing.
 ///
-/// Nothing here can fail in a way worth reporting — the shell's loader
-/// catches a rejected import, and an app that cannot start prints its own
-/// message either way.
+/// So this does no work itself. It hands off to the browser's own readiness
+/// signal and mounts from there. The bug this fixes was exactly that
+/// confusion: a start function that resolved the shell at instantiation, so
+/// the app trapped with `RuntimeError: unreachable` on every load while the
+/// form sat there looking fine and every test passed.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() {
-    ui::mount();
+    ui::start_when_ready();
 }

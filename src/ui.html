@@ -13,7 +13,11 @@
     />
     <meta name="theme-color" content="#111827" />
     <meta name="color-scheme" content="dark" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- `mobile-web-app-capable` is the current spelling of the install hint.
+         The Apple-prefixed name it replaces is deprecated: Chromium logs a
+         warning for it on every single load, and the two are equivalent, so
+         carrying the old name buys nothing. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Chess Clock" />
     <link rel="manifest" href="manifest.webmanifest" />

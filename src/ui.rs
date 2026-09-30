@@ -37,13 +37,13 @@
 //! actually fires.
 
 use std::cell::{RefCell, RefMut};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{Element, HtmlButtonElement, HtmlInputElement, HtmlSelectElement};
 
-use crate::clock::{format_time, Game, Increment, Millis, Phase, Player, Settings};
+use crate::clock::{format_time, Game, Increment, Millis, Phase, Player, Settings, Tap};
 
 /// How often the display is refreshed while a clock runs.
 ///
@@ -64,16 +64,23 @@ struct App {
     anchor: (Millis, f64),
     /// The wake lock, if one is held. Dropping it releases the lock.
     wake_lock: Option<web_sys::WakeLockSentinel>,
-    /// A strong handle to this application.
+    /// A weak handle to this application.
     ///
     /// The Wake Lock request resolves in a callback that cannot borrow from
     /// the call that started it, so it needs a second route back to the
     /// sentinel slot. This is that route, and it is why the application is
-    /// built with `Rc::new_cyclic` before its listeners rather than after:
-    /// patching a handle in afterwards would need a placeholder, and every
-    /// placeholder for a `RefCell<App>` is either `unsafe` or a lie about the
-    /// type.
-    shared: Shared,
+    /// built with `Rc::new_cyclic` rather than `Rc::new`: patching a handle
+    /// in afterwards would need a placeholder, and every placeholder for a
+    /// `RefCell<App>` is either `unsafe` or a lie about the type.
+    ///
+    /// Weak, not strong, for two reasons. The honest one: `new_cyclic` hands
+    /// the closure a `Weak` to an `Rc` that does not exist yet, so
+    /// `upgrade()` inside the constructor is guaranteed to return `None` —
+    /// storing a strong handle there panicked on every load. The better one:
+    /// a callback should not keep the thing it is a callback *on* alive.
+    /// Upgrading happens where the handle is used, and that is the only place
+    /// where the application is guaranteed to still be running.
+    shared: Weak<RefCell<App>>,
     /// The elements, resolved once at mount: a 10 Hz tick should not spend
     /// six DOM lookups a second on six nodes it will use all game.
     dom: Dom,
@@ -137,15 +144,117 @@ fn player_at(index: usize) -> Player {
     }
 }
 
-/// Assemble the application and install it. Called once, by the crate's
-/// `start` function, which `wasm-bindgen` runs when the bindings load.
+/// Mount the app once the document is parsed.
+///
+/// This is the whole of the startup path, and the reason it is not simply
+/// `mount()` is the bug this file was corrected for. A wasm module is
+/// *instantiated* before the document is parsed, so a start function that
+/// resolved the shell at that moment found nothing, panicked, and left the
+/// user looking at a perfectly well-formed setup form that did nothing when
+/// touched — with `RuntimeError: unreachable` as the only clue. No unit test
+/// could see it, because the unit tests never touch a document, and no build
+/// check could see it, because the shell and the bindings were each
+/// individually correct.
+///
+/// The rule this encodes: **never touch the DOM from a start function.**
+/// Either the document is already there, or it is not, and "not" is a state to
+/// wait for rather than a panic.
+pub fn start_when_ready() {
+    let Some(document) = window().document() else {
+        report_start_failure("no document");
+        return;
+    };
+    // `Document::readyState` is not a `ReadyState` enum in web-sys 0.3.105 —
+    // the property is a plain string, and there is no `ReadyState` feature to
+    // enable. Compared as a string, which is also what the spec defines.
+    if document.ready_state() == "loading" {
+        // Still parsing. `DOMContentLoaded` fires once the whole document is
+        // in, which is the earliest moment every element in the shell exists.
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(|_event: web_sys::Event| {
+            mount();
+        });
+        if document
+            .add_event_listener_with_callback("DOMContentLoaded", closure.as_ref().unchecked_ref())
+            .is_err()
+        {
+            report_start_failure("the page did not finish loading");
+            return;
+        }
+        closure.forget();
+        return;
+    }
+    // Already parsed — the module was instantiated late (a cached page, a
+    // re-instantiation, a test harness), so there is nothing to wait for.
+    mount();
+}
+
+/// Tell the user the app did not start, in the shell's own words.
+///
+/// The shell already owns a failure message for exactly this, and reusing it
+/// keeps one copy of the wording. The alternative — a `panic!` — is what
+/// produced the opaque `unreachable` in the first place: a panic inside a
+/// start function aborts instantiation, and the page is left showing a form
+/// that does nothing. A message is a better failure than a trap, and a message
+/// that says so is a failure someone can act on.
+///
+/// Deliberately silent about the cause in the rendered text: the interface
+/// names what happened, not what is under the hood.
+fn report_start_failure(reason: &str) {
+    if let Some(message) = window()
+        .document()
+        .and_then(|document| document.get_element_by_id("load-error"))
+    {
+        let _ = message.set_attribute("data-shown", "true");
+        let text = message.text_content().unwrap_or_default();
+        let text = text
+            .split(" (")
+            .next()
+            .unwrap_or("Chess Clock could not start.");
+        message.set_text_content(Some(&format!("{text} ({reason})")));
+    }
+    // And to the console, where a developer will look and a player will not.
+    web_sys::console::error_1(&JsValue::from_str("chess_clock: could not start"));
+}
+
+/// Attach a listener, or say why it could not be attached.
+///
+/// `add_event_listener_with_callback` returns a `Result`, and unwrapping it is
+/// how a missing element becomes a panic. Every listener in `mount` is on an
+/// element `Dom::resolve` already found, so a failure here means the page is
+/// not the one this app was written against — which is worth saying out loud,
+/// not trapping on. A `false` return lets the caller report once and stop
+/// rather than installing a partial app.
+fn listen(
+    element: &web_sys::EventTarget,
+    event: &str,
+    handler: &Closure<dyn FnMut(web_sys::Event)>,
+    what: &str,
+) -> bool {
+    if element
+        .add_event_listener_with_callback(event, handler.as_ref().unchecked_ref())
+        .is_ok()
+    {
+        return true;
+    }
+    report_start_failure(&format!("the page rejected the {what} control"));
+    false
+}
+
+/// Assemble the application and install it.
+///
+/// Called once the document is parsed — never before. See
+/// [`start_when_ready`], which is the only caller and owns that ordering.
 pub fn mount() {
     let Some(document) = window().document() else {
+        report_start_failure("no document");
         return;
     };
     let Some(dom) = Dom::resolve(&document) else {
         // The shell and the app are committed together and `tests/shell.rs`
-        // checks the ids they share, so a built site cannot reach this.
+        // checks the ids they share, so a built site cannot reach this. If it
+        // somehow does, say so rather than panicking: a page explaining itself
+        // beats a trap.
+        report_start_failure("this page is not the one this app was built for");
         return;
     };
 
@@ -155,9 +264,23 @@ pub fn mount() {
             anchor: (0, 0.0),
             wake_lock: None,
             dom,
-            shared: weak
-                .upgrade()
-                .expect("new_cyclic hands its closure a live weak reference"),
+            // A *weak* self-reference, upgraded where it is used.
+            //
+            // This was a strong `Rc`, upgraded inside the constructor, and it
+            // panicked on every single load: `new_cyclic` runs its closure
+            // *before* the `Rc` is constructed, so no strong reference to it
+            // exists yet and `upgrade()` on the `Weak` returns `None` by
+            // construction. The `.expect()` claimed new_cyclic "hands the
+            // closure a live weak reference" and the opposite was true.
+            //
+            // Worth writing down, because nothing about it is visible in the
+            // source: the old line read as a self-reference with a redundant
+            // `.expect()`, the same shape as the correct line one line below
+            // it. Only a run in a real browser found it. Weak is also right on
+            // the merits -- a callback should not keep alive the thing it is a
+            // callback on.
+            // `new_cyclic` lends the closure a `&Weak`, not a `Weak`.
+            shared: weak.clone(),
         })
     });
 
@@ -165,15 +288,15 @@ pub fn mount() {
     // keyboard's Enter key starts a game with no separate key handler.
     {
         let app = Rc::clone(&app);
-        let form = document
-            .get_element_by_id("setup-form")
-            .expect("the setup form");
+        let Some(form) = document.get_element_by_id("setup-form") else {
+            report_start_failure("the page is missing its start control");
+            return;
+        };
         let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
             event.prevent_default();
             start_game(&app);
         });
-        form.add_event_listener_with_callback("submit", handler.as_ref().unchecked_ref())
-            .expect("listen for submit");
+        listen(&form, "submit", &handler, "start");
         handler.forget();
     }
 
@@ -190,11 +313,12 @@ pub fn mount() {
             sync_increment_fields(&app);
         });
         for id in ["increment-type", "increment-minutes", "increment-seconds"] {
-            let field = document.get_element_by_id(id).expect("an increment field");
+            let Some(field) = document.get_element_by_id(id) else {
+                report_start_failure("the page is missing an increment field");
+                return;
+            };
             for event in ["input", "change"] {
-                field
-                    .add_event_listener_with_callback(event, handler.as_ref().unchecked_ref())
-                    .expect("listen for a field event");
+                listen(&field, event, &handler, "increment field");
             }
         }
         handler.forget();
@@ -210,13 +334,12 @@ pub fn mount() {
         let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
             tap_panel(&app, player);
         });
+        let panel = panel.clone();
         // `click`, as the original used: it is the one event that fires for a
         // tap, for Enter or Space on a focused panel, and for a synthetic
         // click. The panels carry `role="button"` and `tabindex="0"`, so a
         // keyboard can switch turns too.
-        panel
-            .add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())
-            .expect("listen for clicks on a panel");
+        listen(&panel, "click", &handler, "player");
         handler.forget();
     }
 
@@ -226,9 +349,7 @@ pub fn mount() {
         let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
             toggle_pause(&app);
         });
-        pause
-            .add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())
-            .expect("listen for pause");
+        listen(&pause, "click", &handler, "pause");
         handler.forget();
     }
 
@@ -238,8 +359,7 @@ pub fn mount() {
         let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
             go_back(&app);
         });
-        back.add_event_listener_with_callback("click", handler.as_ref().unchecked_ref())
-            .expect("listen for back");
+        listen(&back, "click", &handler, "back");
         handler.forget();
     }
 
@@ -264,9 +384,7 @@ pub fn mount() {
                 app.borrow_mut().wake_lock = None;
             }
         });
-        document
-            .add_event_listener_with_callback("visibilitychange", handler.as_ref().unchecked_ref())
-            .expect("listen for visibilitychange");
+        let _ = listen(&document, "visibilitychange", &handler, "wake lock");
         handler.forget();
     }
 
@@ -283,9 +401,7 @@ pub fn mount() {
                 .service_worker()
                 .register("./service-worker.js");
         });
-        document
-            .add_event_listener_with_callback("DOMContentLoaded", handler.as_ref().unchecked_ref())
-            .expect("listen for DOMContentLoaded");
+        let _ = listen(&document, "DOMContentLoaded", &handler, "offline");
         handler.forget();
     }
 
@@ -386,23 +502,23 @@ fn start_game(app: &Shared) {
 /// A tap on a panel: a start on the first tap of a game, a move after that.
 fn tap_panel(app: &Shared, player: Player) {
     let mut state: RefMut<App> = app.borrow_mut();
-    let phase_before = state.game.phase;
-    state.game.tap(player);
-    if state.game.phase == phase_before {
-        // Not a move: the wrong panel, or a paused or finished game. Nothing
-        // about the display has changed, so it is left alone.
-        return;
-    }
-
-    if phase_before == Phase::Armed {
-        // The first tap of a game *starts* a clock; it does not end a move,
-        // so there is nothing to settle.
-    } else {
-        // A new move has begun, so the increment owed by the last one is paid
-        // first — before the new turn is anchored, because an increment can
-        // lift a player back over zero, and the clock must not be stopped on a
-        // number that is about to change.
-        state.game.settle_increment();
+    match state.game.tap(player) {
+        Tap::Started => {
+            // The first tap of a game *starts* a clock; it does not end a
+            // move, so there is nothing to settle.
+        }
+        Tap::Moved => {
+            // A new move has begun, so the increment owed by the last one is
+            // paid first — before the new turn is anchored, because an
+            // increment can lift a player back over zero, and the clock must
+            // not be stopped on a number that is about to change.
+            state.game.settle_increment();
+        }
+        Tap::Ignored => {
+            // Not a move: the wrong panel, or a paused or finished game.
+            // Nothing about the display has changed, so it is left alone.
+            return;
+        }
     }
 
     if let Some(on_clock) = state.game.on_clock {
@@ -544,7 +660,12 @@ fn request_wake_lock_from(state: &mut App) {
         .wake_lock()
         .request(web_sys::WakeLockType::Screen);
 
-    let app = Rc::clone(&state.shared);
+    // Upgrade here rather than holding a strong handle: this callback runs
+    // long after `mount` returned, and a stale strong handle would keep the
+    // application alive for as long as the browser keeps the promise.
+    let Some(app) = state.shared.upgrade() else {
+        return;
+    };
     // The promise is typed `Promise<WakeLockSentinel>`, so the success
     // handler is handed the sentinel rather than a `JsValue` to unwrap.
     let granted = Closure::<dyn FnMut(web_sys::WakeLockSentinel)>::new(

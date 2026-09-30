@@ -613,6 +613,191 @@ fn the_crate_is_a_library_with_no_binary() {
     }
 }
 
+/// The app must not touch the document from a start function.
+///
+/// This is the regression test for the bug that made the app unusable while
+/// every test passed. `#[wasm_bindgen(start)]` runs when the wasm module is
+/// **instantiated**, which is before the document is parsed — so a start
+/// function that resolved the shell found nothing, panicked, and left the user
+/// looking at a correctly rendered setup form that did nothing when touched.
+/// The only clue was `RuntimeError: unreachable` in the console.
+///
+/// No unit test could see it, because the unit tests never touch a document,
+/// and no build check could see it, because the shell and the bindings were
+/// each individually correct. So the check is static: the start function must
+/// hand off to the readiness gate, and that gate must be what resolves the
+/// DOM. A browser check is the only way to *prove* the fix, and it is a
+/// one-off, not a test suite — see AGENTS.md.
+#[test]
+fn startup_defers_to_document_readiness_before_touching_the_dom() {
+    let source = std::fs::read_to_string(root().join("src/lib.rs")).expect("src/lib.rs");
+    let code = strip_rust_comments(&source);
+
+    // The start function exists, so a panic inside it is still a rejected
+    // import the shell can report.
+    assert!(
+        code.contains("wasm_bindgen(start)"),
+        "the app must still start itself on instantiation, so a failure is catchable"
+    );
+    // And it must not call `mount()` directly. That single call is the whole
+    // bug: mount resolves the shell, and at instantiation time there is no
+    // shell to resolve.
+    assert!(
+        !code.contains("ui::mount()"),
+        "the start function must not mount directly; it must wait for the \
+         document to be parsed (RuntimeError: unreachable on every load)"
+    );
+    assert!(
+        code.contains("ui::start_when_ready()"),
+        "the start function must hand off to the readiness gate"
+    );
+
+    let ui = std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs");
+    let ui = strip_rust_comments(&ui);
+    // The gate checks readiness before mounting.
+    assert!(
+        ui.contains("ready_state"),
+        "the startup path must consult document.readyState before resolving the DOM"
+    );
+    assert!(
+        ui.contains("DOMContentLoaded"),
+        "when the document is still loading, startup must wait for DOMContentLoaded"
+    );
+    // And resolving the shell must never panic.
+    assert!(
+        !ui.contains(".expect(\"the setup form\")"),
+        "startup must not unwrap a DOM lookup; report instead"
+    );
+    assert!(
+        !ui.contains(".expect(\"a panel\")") && !ui.contains(".expect(\"listen for"),
+        "listener installation must not unwrap; report instead"
+    );
+}
+
+/// Nothing the user can read may name the implementation.
+///
+/// The interface is a chess clock. "Rust", "WebAssembly", "wasm", "JavaScript",
+/// "bindings" and "compile" are the authors' and the repository's business, not
+/// the player's — a player whose clock will not start needs to be told what to
+/// do about it, not what is underneath it. Source comments, `AGENTS.md` and
+/// `README.md` are exempt and may say as much as they like.
+#[test]
+fn no_visible_text_names_the_implementation() {
+    let page = shell();
+    // What a player can actually be shown: the markup's own text and
+    // attributes, with the header comment, the inline stylesheet and the
+    // loader script removed. Those three are excluded because the loader and
+    // its comments are the one place these words legitimately appear in the
+    // file, and the sweep below is about what a player reads.
+    let markup = match page.find("<!--") {
+        Some(start) => match page[start..].find("-->") {
+            Some(end) => &page[start + end + 3..],
+            None => "",
+        },
+        None => page.as_str(),
+    };
+    let markup: String = markup
+        .split("<script")
+        .next()
+        .unwrap_or("")
+        .split("<style")
+        .next()
+        .unwrap_or("")
+        .to_string();
+    for banned in [
+        "Rust",
+        "rust",
+        "WebAssembly",
+        "wasm",
+        "Wasm",
+        "JavaScript",
+        "javascript",
+        "bindings",
+        "compile",
+        "wasm-bindgen",
+    ] {
+        assert!(
+            !markup.contains(banned),
+            "{banned:?} appears in the page's visible markup; the interface must \
+             not name the implementation"
+        );
+    }
+    // The failure message is the one string most likely to drift, so check it
+    // explicitly rather than trusting the sweep above.
+    let ui = std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs");
+    for banned in ["Rust", "WebAssembly", "wasm", "JavaScript", "bindings"] {
+        assert!(
+            !ui.contains(&format!("\"{banned}")),
+            "{banned:?} is used in a rendered string in ui.rs"
+        );
+    }
+}
+
+/// The `apple-mobile-web-app-capable` meta is deprecated and Chromium logs a
+/// warning for it on every load. The current spelling is equivalent.
+#[test]
+fn the_shell_does_not_carry_the_deprecated_web_app_capable_meta() {
+    let page = shell();
+    assert!(
+        !page.contains("apple-mobile-web-app-capable"),
+        "Chromium logs a deprecation warning for this on every load"
+    );
+    assert!(
+        page.contains("mobile-web-app-capable"),
+        "the current spelling must be present instead"
+    );
+}
+
+/// Drop `//` line comments, `/* ... */` blocks and `///` doc comments, so an
+/// assertion about what the code *does* cannot be satisfied by a comment
+/// saying what it does.
+fn strip_rust_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let bytes: Vec<char> = source.chars().collect();
+    let mut index = 0;
+    while index < bytes.len() {
+        // A line comment runs to the end of the line, but a `//` inside a
+        // string literal is not a comment. The strings this file checks for
+        // contain no `//`, so a plain scan is enough and a tokenizer is not
+        // worth the complexity here.
+        if bytes[index] == '"' {
+            out.push('"');
+            index += 1;
+            while index < bytes.len() {
+                out.push(bytes[index]);
+                if bytes[index] == '\\' {
+                    index += 1;
+                    if index < bytes.len() {
+                        out.push(bytes[index]);
+                    }
+                } else if bytes[index] == '"' {
+                    index += 1;
+                    break;
+                }
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index] == '/' && index + 1 < bytes.len() && bytes[index + 1] == '/' {
+            while index < bytes.len() && bytes[index] != '\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index] == '/' && index + 1 < bytes.len() && bytes[index + 1] == '*' {
+            index += 2;
+            while index + 1 < bytes.len() && !(bytes[index] == '*' && bytes[index + 1] == '/') {
+                index += 1;
+            }
+            index += 2;
+            continue;
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    out
+}
+
 /// A SHA-256, so the icon digest above needs no dependency. This is the one
 /// place a hash is wanted and a crate is not: the alternative is a
 /// `build-dependency` used by exactly one assertion.

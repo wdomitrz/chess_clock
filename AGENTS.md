@@ -218,15 +218,80 @@ every hide. The sentinel is **held** in the app for as long as the game runs —
 a wake lock is a handle, not a call — and dropped on Back and on a flag, so the
 phone is not held awake over a form or a results screen.
 
+## Two bugs that only a browser could find
+
+Both shipped in the first release. Both passed every unit test, both passed
+`clippy` on both targets, and both passed the CI build and its eight-file site
+check. They were found by loading the built site in Chromium and playing a
+game. The reasons are the same in both cases and are worth stating as a rule,
+because nothing in the test suite can see either.
+
+**Never touch the DOM from a start function.** `#[wasm_bindgen(start)]` runs
+when the wasm module is *instantiated*, which is before the document is
+parsed. A start function that resolved the shell found nothing and trapped,
+leaving a correctly rendered setup form that did nothing when touched, with
+`RuntimeError: unreachable` as the only clue. So `start()` now does no work: it
+calls `start_when_ready()`, which consults `document.readyState` and mounts
+immediately if the document is already parsed, or on `DOMContentLoaded` if it
+is not. `tests/shell.rs` asserts the ordering statically — the start function
+must not call `mount()` — because that is the one property a unit test *can*
+check. Note that `Document::readyState` is a plain `String` in web-sys
+0.3.105; there is no `ReadyState` enum and no feature to enable.
+
+**`Rc::new_cyclic` cannot give you a strong self-reference.** Its closure runs
+*before* the `Rc` exists, so `weak.upgrade()` inside it returns `None` by
+construction. The code was
+
+```rust
+shared: weak.upgrade().expect("new_cyclic hands the closure a live weak reference"),
+```
+
+which panicked on every load, and the `.expect()` asserted the exact opposite
+of the truth. The field is now a `Weak<RefCell<App>>`, upgraded where it is
+used, which is also better on the merits: a callback should not keep alive the
+thing it is a callback on. This one is worth dwelling on, because the line is
+*visually identical* to the correct version that sits one line below it.
+
+**A browser check is the only thing that would have caught either**, and it is
+a one-off rather than a test suite — no browser tests are committed, in line
+with the rest of the family. What it did: load the built `dist/` from a local
+server, start a 20-second game with a 3-second increment, tap a panel, watch
+the clock run, hand over, and compare the numbers. Which found a third bug:
+
+**Never infer "was that a move?" from `phase`.** `ui.rs` compared `phase`
+before and after `Game::tap` to decide whether to settle the increment. A
+hand-over does not change `phase` — it changes `on_clock` — so every genuine
+move read as "nothing happened" and the increment was **never paid**, while the
+display updated and looked entirely normal. The app played with no increment at
+all. `Game::tap` now returns a `Tap` (`Started` / `Moved` / `Ignored`), marked
+`#[must_use]`, and the caller settles on `Moved`. The unit tests missed this
+because they all called `settle_increment` themselves and never consulted what
+`tap` reported; `tap_reports_exactly_what_it_did` and
+`a_reported_move_settles_its_increment` now pin it.
+
+The lesson for the other five repos: a green suite and a green build prove the
+*parts* are right, and this is a whole app failing to start. Load it.
+
+## Startup
+
+`mount()` reports rather than panics, everywhere. Every DOM lookup on the
+startup path goes through `Dom::resolve`, which returns an `Option`, and a
+failure calls `report_start_failure` — which reuses the shell's own message
+rather than trapping. `listen` attaches a listener or says why it could not,
+instead of unwrapping a `Result`. A page that explains itself is a far better
+failure than an opaque `unreachable`, and it is a failure someone can act on.
+
 ## Code map
 
 - `clock.rs`: the game. Time formatting, both increment rules, the
   turn/pause/finish state machine, and the `Phase` enum that makes
   "running with no player" and "paused with a live interval" unrepresentable.
   No `web-sys`, no DOM, every rule unit-tested.
-- `ui.rs`: wasm-only. Resolves the shell's elements once, installs the
-  listeners, drives the tick, holds the wake lock, and paints. It contains no
-  rule about how a clock works — it asks `clock` and renders the answer.
+- `ui.rs`: wasm-only. Waits for the document, resolves the shell's elements
+  once, installs the listeners, drives the tick, holds the wake lock, and
+  paints. It contains no rule about how a clock works — it asks `clock` and
+  renders the answer, and acts on what `clock` reports. See "Two bugs that only
+  a browser could find" above, which are all in this file.
 - `ui.html`: the static shell. One inline `<style>` with the original's
   colours as custom properties, one `<script type="module">` whose body is the
   dynamic import of the generated bindings. Rust owns everything dynamic.
@@ -243,12 +308,13 @@ phone is not held awake over a form or a results screen.
 
 `cargo test --locked`, no browser and no external tool.
 
-`src/clock.rs` carries 33 unit tests: the increment rules including the Bronstein
+`src/clock.rs` carries 35 unit tests: the increment rules including the Bronstein
 cap swept across increments and spends, the three formatter branches and their
 boundaries (59:59 against 1:00:00, the truncation at 9.999 s, the four-character
 padding), and every transition of the state machine — first tap, idle tap,
 pause and resume, flagging from either side, a finished game accepting nothing,
-and re-arming.
+re-arming, and what a tap reports — because the caller has to know, and
+getting it wrong meant the increment was never paid (see above).
 
 `tests/shell.rs` asserts the invariants of the committed shell: that the page
 loads the generated bindings and **calls** their initializer, that there is
@@ -288,7 +354,21 @@ Three of these deserve their reason written down:
   recorded digest is what catches it. The SHA-256 is implemented in the test
   file, ~40 lines, rather than adding a dependency for one assertion.
 
-The comment-stripping helper in `tests/shell.rs` exists because the shell
+Four more assertions here earn their place for the same reason as the three
+above: they check properties no unit test can reach. `startup_defers_to
+_document_readiness_before_touching_the_dom` pins the start-function ordering.
+`no_visible_text_names_the_implementation` keeps `Rust`, `WebAssembly`, `wasm`,
+`JavaScript`, `bindings` and `compile` out of anything a player can read — the
+interface is a chess clock, and the source, this file and `README.md` are free
+to say as much as they like.
+`the_shell_does_not_carry_the_deprecated_web_app_capable_meta` keeps Chromium
+from logging a deprecation warning on every load; the current spelling is
+`mobile-web-app-capable`.
+
+The comment-stripping helpers in `tests/shell.rs` exist because the shell and
+this crate both *explain* their failures in comments that necessarily contain
+the very text being asserted on; a raw substring search finds the explanation
+before the code.
 *explains* the `m.default()` failure in a comment that necessarily contains the
 text being asserted on; a raw substring search finds the explanation before the
 code.

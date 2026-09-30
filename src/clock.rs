@@ -209,6 +209,31 @@ impl Phase {
     }
 }
 
+/// What a tap on a panel actually did.
+///
+/// A three-way answer rather than a `bool`, because the caller has three
+/// different things to do, and collapsing "started a clock" into "made a move"
+/// is what made the increment go unpaid — see [`Game::tap`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tap {
+    /// The first tap of a game. A clock starts; no move has been made, so
+    /// there is no increment to settle.
+    Started,
+    /// The running player has moved. They are owed the increment, and the
+    /// other side takes the clock.
+    Moved,
+    /// Not a move: the wrong panel, or a paused or finished game. Nothing
+    /// about the display has changed.
+    Ignored,
+}
+
+impl Tap {
+    /// Whether this tap ended a move, and so owes an increment.
+    pub fn is_move(self) -> bool {
+        matches!(self, Self::Moved)
+    }
+}
+
 /// Who is on the clock, or nobody.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Player {
@@ -301,7 +326,16 @@ impl Game {
     /// meaningful on the panel that is currently running — tapping your own
     /// panel twice does nothing, because the move is not over until the other
     /// player answers. That asymmetry is preserved exactly.
-    pub fn tap(&mut self, player: Player) {
+    ///
+    /// Returns what the tap did, because the caller has to know. It used to
+    /// re-derive that by comparing `phase` before and after, which is wrong:
+    /// handing the turn over does not change `phase` — it only changes
+    /// `on_clock` — so a genuine move read as "nothing happened", and the
+    /// increment was silently never paid. The display updated, so it looked
+    /// right; only the numbers were wrong, and only a real game against a real
+    /// clock showed it.
+    #[must_use = "a tap must be acted on: only a move settles the increment"]
+    pub fn tap(&mut self, player: Player) -> Tap {
         match self.phase {
             // The first tap: that side's clock starts, and nobody is owed an
             // increment yet.
@@ -310,6 +344,7 @@ impl Game {
                 self.on_clock = Some(player);
                 self.owed = None;
                 self.at_move_start = self.remaining[player.index()];
+                Tap::Started
             }
             Phase::Running if self.on_clock == Some(player) => {
                 // The running player has moved: they are owed the increment,
@@ -325,12 +360,11 @@ impl Game {
                 // start once it has paid.
                 self.owed = Some(player);
                 self.on_clock = Some(player.other());
+                Tap::Moved
             }
-            // A tap on the idle panel, or on a paused or finished game, is
-            // not a move. The original ignored these too; returning `false`
-            // lets the caller leave the display alone rather than re-render an
-            // unchanged screen.
-            _ => {}
+            // A tap on the idle panel, or on a paused or finished game, is not
+            // a move. The original ignored these too.
+            _ => Tap::Ignored,
         }
     }
 
@@ -644,6 +678,74 @@ mod tests {
         game
     }
 
+    /// The caller must be able to tell a move from a non-move, because the
+    /// increment is only settled for a move.
+    ///
+    /// This is the regression test for the second bug the browser check found:
+    /// `tap_panel` decided "was that a move?" by comparing `phase` before and
+    /// after, and handing the turn over does not change `phase` — it changes
+    /// `on_clock`. So every real move read as "nothing happened", the
+    /// increment was never settled, and the app played with no increment at
+    /// all while looking entirely normal. The unit tests did not catch it
+    /// because they all called `settle_increment` themselves and never
+    /// consulted what `tap` reported.
+    #[test]
+    fn tap_reports_exactly_what_it_did() {
+        let mut game = armed();
+        // The first tap starts a clock, and is not a move.
+        assert_eq!(game.tap(Player::First), Tap::Started);
+        assert!(!Tap::Started.is_move());
+        // The waiting panel is not a move.
+        assert_eq!(game.tap(Player::Second), Tap::Ignored);
+        assert!(!Tap::Ignored.is_move());
+        // The running panel is a move — and the phase does *not* change, which
+        // is exactly why the caller cannot infer this by comparing it.
+        let phase_before = game.phase;
+        assert_eq!(game.tap(Player::First), Tap::Moved);
+        assert!(Tap::Moved.is_move());
+        assert_eq!(game.phase, phase_before, "a hand-over keeps the phase");
+        // And it is a move precisely when an increment is owed.
+        assert_eq!(game.owed, Some(Player::First));
+    }
+
+    /// A move reported by `tap` must be payable, end to end, with no other
+    /// signal: this is the sequence `ui.rs` runs on a hand-over.
+    #[test]
+    fn a_reported_move_settles_its_increment() {
+        let settings = Settings {
+            initial: 20_000,
+            increment: 3_000,
+            kind: Increment::Fischer,
+        };
+        let mut game = Game::new(settings);
+        game.arm();
+
+        if game.tap(Player::First).is_move() {
+            panic!("the first tap is not a move");
+        }
+        game.tick(2_000, settings.initial);
+        assert_eq!(game.remaining[0], 18_000);
+
+        // The mover taps: reported as a move, so the increment is settled.
+        let tap = game.tap(Player::First);
+        assert_eq!(tap, Tap::Moved);
+        if tap.is_move() {
+            game.settle_increment();
+        }
+        // 20 − 2 spent, + 3 paid. Without the settle this reads 18.0.
+        assert_eq!(game.remaining[0], 21_000);
+        assert_eq!(game.remaining[1], settings.initial);
+
+        // And the other side's tap, which is a move too, pays them in turn.
+        game.tick(500, settings.initial);
+        let tap = game.tap(Player::Second);
+        assert_eq!(tap, Tap::Moved);
+        if tap.is_move() {
+            game.settle_increment();
+        }
+        assert_eq!(game.remaining[1], 22_500);
+    }
+
     #[test]
     fn a_new_game_arms_with_both_clocks_at_the_starting_time() {
         let game = armed();
@@ -658,7 +760,8 @@ mod tests {
         // Not always the first player: the original lets whoever is sitting
         // there open, which is why it clears the active highlight while armed.
         let mut game = armed();
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         assert_eq!(game.phase, Phase::Running);
         assert_eq!(game.on_clock, Some(Player::Second));
         // Nobody is owed anything by the first tap: no move has been made.
@@ -668,9 +771,11 @@ mod tests {
     #[test]
     fn a_tap_on_the_running_panel_makes_the_move_and_switches_turn() {
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert_eq!(game.on_clock, Some(Player::First));
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert_eq!(game.on_clock, Some(Player::Second));
         assert_eq!(game.owed, Some(Player::First));
     }
@@ -681,10 +786,12 @@ mod tests {
         // when the *other* player acts, so a tap on the waiting panel is not a
         // move, and cannot be used to farm an increment.
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         let before = game.remaining;
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         assert_eq!(game.remaining, before);
         assert_eq!(game.on_clock, Some(Player::First));
         assert_eq!(game.owed, None);
@@ -697,10 +804,13 @@ mod tests {
         // the other player. The exploitable case — tapping the panel you are
         // NOT on — is what the idle-panel rule above blocks.
         let mut game = armed();
-        game.tap(Player::First);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert_eq!(game.on_clock, Some(Player::Second));
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         assert_eq!(game.on_clock, Some(Player::First));
     }
 
@@ -713,11 +823,13 @@ mod tests {
         };
         let mut game = Game::new(settings);
         game.arm();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         // The first player thinks for 10 s.
         game.tick(10_000, TEN_MINUTES);
         assert_eq!(game.remaining[0], TEN_MINUTES - 10_000);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         // Fischer: the full 3 s, so 590 s plus 3 s.
         assert_eq!(game.remaining[0], TEN_MINUTES - 7_000);
@@ -733,10 +845,12 @@ mod tests {
         };
         let mut game = Game::new(settings);
         game.arm();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.tick(60_000, TEN_MINUTES);
         assert_eq!(game.remaining[0], TEN_MINUTES - 60_000);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         // 60 s spent against a 3 s increment: paid the increment, not the
         // spend, so 540 s + 3 s. Fischer and Bronstein agree here — what
@@ -758,9 +872,11 @@ mod tests {
             };
             let mut game = Game::new(settings);
             game.arm();
-            game.tap(Player::First);
+            // The tap's effect is asserted on the lines that follow.
+            let _ = game.tap(Player::First);
             game.tick(300, TEN_MINUTES);
-            game.tap(Player::First);
+            // The tap's effect is asserted on the lines that follow.
+            let _ = game.tap(Player::First);
             game.settle_increment();
             game.remaining[0]
         };
@@ -792,9 +908,11 @@ mod tests {
 
         // Move 1: First thinks 30 s and taps to hand over. Paid 5 s:
         // 600 → 570 → 575, and Second is now on the clock.
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.tick(30_000, TEN_MINUTES);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         assert_eq!(game.remaining[0], TEN_MINUTES - 25_000);
         assert_eq!(game.on_clock, Some(Player::Second));
@@ -804,7 +922,8 @@ mod tests {
         // Second's short move is made whole, which is Bronstein's whole point;
         // in Fischer Second would have gained 5 s here instead.
         game.tick(5_000, TEN_MINUTES);
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         game.settle_increment();
         assert_eq!(game.remaining[1], TEN_MINUTES);
         assert_eq!(game.remaining[0], TEN_MINUTES - 25_000);
@@ -816,7 +935,8 @@ mod tests {
         // taken against the start of the game, First's fast finishing could
         // pay their way back to 600 s.
         game.tick(30_000, TEN_MINUTES - 25_000);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         assert_eq!(game.remaining[0], TEN_MINUTES - 50_000);
         assert!(
@@ -837,10 +957,12 @@ mod tests {
         };
         let mut game = Game::new(settings);
         game.arm();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert!(!game.tick(99_920, 100_000));
         assert_eq!(game.remaining[0], 80);
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.settle_increment();
         assert_eq!(game.remaining[0], 2_080);
         assert_eq!(game.phase, Phase::Running, "the game continues");
@@ -849,7 +971,8 @@ mod tests {
     #[test]
     fn pausing_freezes_the_clock_and_resuming_continues_the_same_move() {
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.tick(4_000, TEN_MINUTES);
         game.toggle_pause();
         assert_eq!(game.phase, Phase::Paused);
@@ -872,10 +995,12 @@ mod tests {
     fn tapping_while_paused_is_not_a_move() {
         // The original's `switchPlayer` began with `if (!isRunning) return`.
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.toggle_pause();
         let before = game.remaining;
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert_eq!(game.remaining, before);
         assert_eq!(game.on_clock, Some(Player::First));
         assert_eq!(game.owed, None);
@@ -884,7 +1009,8 @@ mod tests {
     #[test]
     fn running_out_stops_the_game_and_paints_the_loser() {
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         assert!(game.tick(TEN_MINUTES, TEN_MINUTES), "flagged");
         assert_eq!(game.remaining[0], 0);
         assert_eq!(game.phase, Phase::Finished);
@@ -895,11 +1021,14 @@ mod tests {
     #[test]
     fn a_finished_game_accepts_no_further_transitions() {
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.tick(TEN_MINUTES, TEN_MINUTES);
         // Taps, pauses and ticks are all no-ops, and the loser stays put.
-        game.tap(Player::First);
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         game.toggle_pause();
         assert!(!game.tick(TEN_MINUTES * 2, TEN_MINUTES));
         assert_eq!(game.phase, Phase::Finished);
@@ -910,7 +1039,8 @@ mod tests {
     #[test]
     fn the_second_player_can_flag_too() {
         let mut game = armed();
-        game.tap(Player::Second);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::Second);
         assert!(game.tick(TEN_MINUTES, TEN_MINUTES));
         assert_eq!(game.loser(), Some(Player::Second));
     }
@@ -920,7 +1050,8 @@ mod tests {
         // What Back does. A half-finished game must not bleed into the next
         // one, and in particular must not leave a panel red.
         let mut game = armed();
-        game.tap(Player::First);
+        // The tap's effect is asserted on the lines that follow.
+        let _ = game.tap(Player::First);
         game.tick(TEN_MINUTES, TEN_MINUTES);
         assert_eq!(game.phase, Phase::Finished);
         game.arm();
@@ -963,7 +1094,8 @@ mod tests {
             };
             let mut game = Game::new(settings);
             game.arm();
-            game.tap(Player::First);
+            // The tap's effect is asserted on the lines that follow.
+            let _ = game.tap(Player::First);
 
             for step in 0..50i64 {
                 let mover = game.on_clock.expect("an armed game is on the clock");
@@ -979,7 +1111,7 @@ mod tests {
                 let after_think = game.remaining[mover.index()];
                 assert_eq!(after_think, start - spent);
 
-                game.tap(mover);
+                let _ = game.tap(mover);
                 let waiting = game.on_clock.expect("turn switched");
                 assert_eq!(waiting, mover.other());
                 game.settle_increment();
@@ -1017,7 +1149,7 @@ mod tests {
                 // And a tap on the panel that is not running is never a move,
                 // however it is spammed.
                 let before = game.remaining;
-                game.tap(mover);
+                let _ = game.tap(mover);
                 assert_eq!(game.remaining, before, "{kind:?}: idle tap moved a clock");
                 assert_eq!(game.on_clock, Some(waiting));
             }

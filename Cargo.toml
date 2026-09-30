@@ -54,8 +54,15 @@ web-sys = { version = "0.3.105", features = [
   # lock left the screen able to dim.
   "console",
   # The service worker, registered from Rust exactly as the original
-  # registered `sw.js` from JavaScript.
+  # registered `sw.js` from JavaScript, and then cleaned up: `ServiceWorker`
+  # is the type `ServiceWorkerRegistration::active` hands back (its script URL
+  # is how a stale registration is told apart from a sibling's),
+  # `RegistrationOptions` is how the scope is stated rather than inherited,
+  # and `Location`/`Url` resolve this app's own directory so only a wider
+  # registration of *this* app's worker is released.
   "ServiceWorkerContainer", "ServiceWorkerRegistration",
+  "ServiceWorker", "RegistrationOptions",
+  "Location", "Url"
 ] }
 
 [lints.rust]

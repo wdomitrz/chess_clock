@@ -5,8 +5,63 @@ name = "chess_clock"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
+description = "Private two-player Fischer/Bronstein chess clock PWA, in Rust"
 
 [lib]
 name = "chess_clock"
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+# Only for `tests/shell.rs`, which parses the manifest constant out of
+# `build.rs` so a malformed one cannot be committed and discovered broken at
+# release time. The crate itself is browser-only and needs no JSON: `build.rs`
+# is a build script and has its own copy below.
+serde_json = "1"
+
+[build-dependencies]
+usvg = { version = "0.48", default-features = false }
+resvg = { version = "0.48", default-features = false }
+tiny-skia = "0.12"
+serde_json = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.128"
+wasm-bindgen-futures = "0.4.78"
+js-sys = "0.3.105"
+web-sys = { version = "0.3.105", features = [
+  # Wake Lock, for keeping the screen on with the device lying flat between
+  # the two players. Four features, not one: `Navigator` is where the request
+  # is made, `WakeLock` is the manager object, `WakeLockSentinel` is the
+  # handle that has to be *held* (a sentinel that is dropped releases the
+  # lock), and `WakeLockType` is the argument to `request`. Enabling
+  # `WakeLock` alone does not enable the other three — they are independent
+  # features in web-sys, and the compiler says so by name.
+  "Navigator", "WakeLock", "WakeLockSentinel", "WakeLockType",
+  # The shell: two screens of static structure that Rust shows and hides.
+  "Window", "Document", "Element", "HtmlElement", "HtmlInputElement",
+  "HtmlSelectElement", "HtmlButtonElement",
+  # Events, the monotonic clock the original read with `performance.now()`,
+  # and the two screens Rust has to ask about: `VisibilityState` types
+  # `document.visibilityState`, and the wake lock is re-taken on it.
+  "Event", "EventTarget", "Performance", "VisibilityState",
+  # `console` is a *feature*, not a type: it exposes the global as
+  # `web_sys::console::error_1(&JsValue)`. There is no `web_sys::Console`
+  # struct, and reaching for one is a compile error that reads as a missing
+  # dependency rather than a wrong name. Used once, to say why a refused wake
+  # lock left the screen able to dim.
+  "console",
+  # The service worker, registered from Rust exactly as the original
+  # registered `sw.js` from JavaScript.
+  "ServiceWorkerContainer", "ServiceWorkerRegistration",
+] }
+
+[lints.rust]
+warnings = "deny"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

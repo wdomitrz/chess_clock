@@ -157,10 +157,11 @@
          that with the phone lying flat on the table between the two players
          each of them reads their own clock the right way up.
 
-         The two rotations are OPPOSITE (see `#panel-1 .reading`): the top
-         panel turns clockwise, the bottom one anticlockwise, so both read
-         outward, toward the player sitting on that edge. The buttons are
-         centred between the panels and turn with the top panel. */
+         The two rotations are OPPOSITE (see `#panel-0 .reading` and
+         `#panel-1 .reading`): the top panel turns anticlockwise, the bottom
+         clockwise, so both read outward, toward the player sitting on that
+         edge. The buttons are centred between the panels and turn with the
+         top panel. */
       #game {
         display: grid;
         grid-template-rows: 1fr 1fr;
@@ -189,6 +190,11 @@
          *   rotate:90deg              -> marker at (80, -80)   identical
          *   both                      -> marker at (180, 0)   180 deg, wrong
          *
+         * (Those markers are a horizontal 200x40 box, so this table is about
+         * the composition, not about the app's layout — the app's panels are
+         * tall and narrow, and the direction there is measured in the
+         * `#panel-* .reading` rules below.)
+         *
          * The original set one (`rotate: 90deg`, in its Tailwind build) and
          * this set two, "for a browser that only knows the old one" — which is
          * not how it works. `transform: rotate()` is understood by every
@@ -205,7 +211,6 @@
         font-size: clamp(2rem, 12vw, 4.5rem);
         font-weight: 700;
         font-variant-numeric: tabular-nums;
-        transform: rotate(90deg);
       }
       .panel[data-state="active"] {
         background: var(--panel-active);
@@ -216,23 +221,40 @@
       /* Outward, not inward.
        *
        * The phone lies flat between the two players. The top edge of the
-       * screen faces the player above it, the bottom edge faces the player
-       * below it, so each panel's reading has to be turned to face *outward*
-       * — away from the device's centre line, toward the person who owns it.
-       * That means the two panels turn in OPPOSITE directions: the top one
-       * clockwise, the bottom one anticlockwise. Rotating both the same way
-       * makes them face each other across the table, which is the mirror of
-       * what a two-sided clock is for — and it is wrong for a player who has
-       * to turn their head to read their own time.
+       * screen faces the player above it and the bottom edge the player
+       * below it, so each panel's reading must be turned to face *away* from
+       * the device's centre line — outward, toward the person sitting on that
+       * edge. The two panels therefore turn in OPPOSITE directions, and which
+       * way each one goes is a fact to be measured rather than reasoned about.
        *
-       * `panel-0` is the first row, so it is the one the player at the top
-       * edge is looking at, and it turns clockwise (90deg). `panel-1` is the
-       * second row, and turns anticlockwise (270deg). Both buttons are
-       * centred between the panels, so they turn to match `panel-0` — they
-       * are the shared controls and neither player owns them.
+       * Measured, in Chromium, by taking a `Range` over the first character of
+       * each reading and seeing where that glyph lands inside its panel:
+       *
+       *   panel-0 (top row)    reads BOTTOM to TOP    — starts low, runs up
+       *   panel-1 (bottom row) reads TOP to BOTTOM    — starts high, runs down
+       *
+       * so each reading begins at the device's centre and travels outward, and
+       * a player at either edge reads along the phone's length, away from the
+       * other player. Rotating both the same way would instead point them at
+       * each other across the table, which is the mirror of what a two-sided
+       * clock is for.
+       *
+       * The previous version of this had the two the other way round: 90deg
+       * on the top panel and 270deg on the bottom, which measured as
+       * top-to-bottom and bottom-to-top — both readings starting at the
+       * outer edge and running inward, facing each other. The angles looked
+       * right, and the direction was the opposite of what they meant.
+       *
+       * `panel-0` is the first row, so it is the panel the player at the top
+       * edge reads, and it turns anticlockwise. `panel-1` is the second row
+       * and turns clockwise. The buttons are centred between the panels, so
+       * they are nobody's own; they take the top panel's direction.
        */
-      #panel-1 .reading {
+      #panel-0 .reading {
         transform: rotate(270deg);
+      }
+      #panel-1 .reading {
+        transform: rotate(90deg);
       }
 
       /* The two buttons sit over the panels but must not swallow the taps
@@ -256,7 +278,7 @@
            `transform` compose, and setting both turns the label 180deg. The
            buttons are centred on the device's midline, so they take the top
            panel's direction. */
-        transform: rotate(90deg);
+        transform: rotate(270deg);
         pointer-events: auto;
         font-family: inherit;
         font-weight: 700;

@@ -869,10 +869,14 @@ fn no_visible_text_names_the_implementation() {
 ///   edge: `transform:rotate(90deg)` alone puts the marker at (80, -80);
 ///   `rotate:90deg` alone at (80, -80); both together at (180, 0).
 /// * **The direction.** Rotating both panels the same way makes them face
-///   each other across the table, which is the mirror of what a two-sided
-///   clock is for. With the phone flat, the top edge faces the player above
-///   it and the bottom edge the player below, so the readings have to turn
-///   away from the device's midline — opposite ways.
+///   each other across the table, and rotating them opposite ways can still
+///   point them *inward* rather than outward — which is what a first
+///   attempt at this did, and which the tests did not catch, because they
+///   only asserted that the two rotations differed. With the phone flat, the
+///   top edge faces the player above it and the bottom edge the player below,
+///   so each reading has to run *away* from the device's midline: the top
+///   panel's digits run upward, the bottom panel's run downward. Which of the
+///   two angles achieves that is asserted here by value, not by inequality.
 #[test]
 fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
     let page = shell();
@@ -923,19 +927,66 @@ fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
         );
     }
 
-    // The panel-specific rule must exist and must be the *other* direction
-    // from the default. `#panel-1` is the second row, so it is the panel the
-    // player at the bottom edge is looking at.
-    assert!(
-        code.contains("#panel-1 .reading"),
-        "the second row must have its own rotation, or both readings face the \
-         same way and the players read across the table at each other"
-    );
-    let top = rotations[0];
-    let bottom = rotations[1];
+    // The panel-specific rules must both exist and must disagree.
+    //
+    // Note what this test previously did *not* check: it asserted the two
+    // rotations differ, and was content with that. So it passed on a build
+    // where they were the right angles for facing *inward*, which is what
+    // shipped. "Opposite" is necessary and not sufficient — the question is
+    // which one faces out, and that is now asserted directly.
+    let panel_rotation = |panel: &str| -> Option<i64> {
+        let marker = format!("#{panel} .reading {{");
+        let at = code.find(&marker)?;
+        let tail = &code[at + marker.len()..];
+        let end = tail.find('}')?;
+        let block = &tail[..end];
+        let rotate = block.find("rotate(")?;
+        let value = &block[rotate + "rotate(".len()..];
+        let end_deg = value.find("deg)")?;
+        value[..end_deg].parse().ok()
+    };
+
+    let top = panel_rotation("panel-0").expect("#panel-0 .reading must set a rotation");
+    let bottom = panel_rotation("panel-1").expect("#panel-1 .reading must set a rotation");
     assert_ne!(
         top, bottom,
-        "the two readings must turn opposite ways to face outward"
+        "the two readings must turn opposite ways, or both players read the same \
+         direction and one of them is reading upside down"
+    );
+
+    // Outward, specifically. Measured in Chromium by taking a `Range` over the
+    // first character of each reading and seeing where that glyph lands inside
+    // its own panel:
+    //
+    //   #panel-0, 270deg, panel spans y 493..740, first glyph y 666..716
+    //       -> the first digit is at the BOTTOM of the panel, so the reading
+    //          runs upward: out of the device's centre, toward the player at
+    //          the top edge.
+    //   #panel-1, 90deg,  panel spans y 740..986, first glyph y 763..813
+    //       -> the first digit is at the TOP of the panel, so the reading runs
+    //          downward: out of the centre, toward the player at the bottom.
+    //
+    // Getting this backwards is not subtle to a user and was not subtle to
+    // measurement either: the previous build had 90 on the top panel and 270 on
+    // the bottom, which put the first digit at the outer edge of each panel and
+    // pointed the two readings at one another across the table.
+    assert_eq!(
+        top, 270,
+        "the top panel's reading must run upward, away from the device's centre"
+    );
+    assert_eq!(
+        bottom, 90,
+        "the bottom panel's reading must run downward, away from the device's centre"
+    );
+
+    // The buttons sit on the midline, so they are nobody's own and take the top
+    // panel's direction.
+    let buttons = code.find("#controls button {").expect("the controls rule");
+    let tail = &code[buttons + "#controls button {".len()..];
+    let block = &tail[..tail.find('}').expect("a closed block")];
+    assert!(
+        block.contains("rotate(270deg)"),
+        "the buttons are centred on the midline and turn with the top panel"
     );
 }
 

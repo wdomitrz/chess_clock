@@ -272,6 +272,47 @@ because they all called `settle_increment` themselves and never consulted what
 The lesson for the other five repos: a green suite and a green build prove the
 *parts* are right, and this is a whole app failing to start. Load it.
 
+## Orientation: the readings face outward, and turn exactly once
+
+Two defects, both invisible to every test and to a screenshot taken at a
+glance. They were found by measuring the rendered geometry in a browser and
+then looking at the picture.
+
+**Never set both `rotate` and `transform` on one element.** They are two
+independent transform functions and a browser *composes* them. This set
+`rotate: 90deg` and `transform: rotate(90deg)` on the readings, "for a
+browser that only knows the old one" — so every reading rendered at **180°**,
+upside down rather than rotated. Measured in Chromium on a 200×40 box with a
+marker on its left edge:
+
+| declaration | marker lands at | angle |
+|---|---|---|
+| `transform: rotate(90deg)` | (80, −80) | 90° |
+| `rotate: 90deg` | (80, −80) | 90° |
+| **both** | **(180, 0)** | **180°** |
+
+The original Tailwind build set one property, and the fallback bought nothing
+— `transform: rotate()` is understood by every browser that ever ran this app.
+Only `transform` is used now: it is the spelling that works in browsers without
+the independent `rotate`/`translate` properties (Safari before 14.1), which is
+the real reason to prefer it over the newer one.
+
+**The two panels must turn in opposite directions.** Rotating both the same way
+makes them face each other across the table — the mirror of what a two-sided
+clock is for, and wrong for a player who has to turn their head to read their
+own time. With the phone flat on the table, the top edge faces the player above
+it and the bottom edge the player below, so each reading turns *away* from the
+device's midline: `#panel-0` (first row) `90deg`, `#panel-1` (second row)
+`270deg`. The buttons are centred on the midline, belong to neither player, and
+take the top panel's direction.
+
+Both are pinned by `the_readings_turn_outward_and_never_by_both_properties_at_once`
+and `the_game_screen_puts_panel_zero_first`, each verified to fail when the bug
+is reintroduced. Worth noting the first version of that test *did not* catch
+the double-rotation bug — it compared the two properties within a block in a way
+that a later declaration always satisfied — which is a fair argument for
+checking that a regression test actually fails on the bug it is for.
+
 ## Startup
 
 `mount()` reports rather than panics, everywhere. Every DOM lookup on the
@@ -294,7 +335,9 @@ failure than an opaque `unreachable`, and it is a failure someone can act on.
   a browser could find" above, which are all in this file.
 - `ui.html`: the static shell. One inline `<style>` with the original's
   colours as custom properties, one `<script type="module">` whose body is the
-  dynamic import of the generated bindings. Rust owns everything dynamic.
+  dynamic import of the generated bindings. Rust owns everything dynamic. The
+  two panel rotations are the one piece of layout that is not copyable text —
+  see "Orientation" above.
 - `service-worker.js`: caches only a fixed app-shell allowlist, scope-specific
   content-versioned cache, atomic install, no `skipWaiting`, so an update
   cannot swap the wasm under a live game.
@@ -316,7 +359,9 @@ pause and resume, flagging from either side, a finished game accepting nothing,
 re-arming, and what a tap reports — because the caller has to know, and
 getting it wrong meant the increment was never paid (see above).
 
-`tests/shell.rs` asserts the invariants of the committed shell: that the page
+`tests/shell.rs` asserts the invariants of the committed shell — including the
+panel rotation, which is the one visual property that no amount of unit testing
+can check: that the page
 loads the generated bindings and **calls** their initializer, that there is
 exactly one script tag, that every URL is relative, that the worker's
 `__VERSION__` placeholder appears exactly once and `skipWaiting` does not, that
@@ -410,3 +455,7 @@ publishable and has no app in it.
 - A game is not persisted. Reloading the page loses it, as it did originally;
   the app has no storage, and adding some would be a feature rather than a
   port.
+- The readings are sized with `clamp()` against the viewport width, not against
+  the panel's own aspect, so a very wide, short window can clip a long
+  `h:mm:ss`. The original had the same property, having the same fixed font size
+  and the same rotation.

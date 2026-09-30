@@ -155,9 +155,12 @@
       /* --- game ---
          Two full-height panels, each reading its own time rotated 90°, so
          that with the phone lying flat on the table between the two players
-         each of them reads their own clock the right way up. The rotation is
-         the reason the display is a grid of rows and the buttons are rotated
-         to match; changing either has to change both. */
+         each of them reads their own clock the right way up.
+
+         The two rotations are OPPOSITE (see `#panel-1 .reading`): the top
+         panel turns clockwise, the bottom one anticlockwise, so both read
+         outward, toward the player sitting on that edge. The buttons are
+         centred between the panels and turn with the top panel. */
       #game {
         display: grid;
         grid-template-rows: 1fr 1fr;
@@ -174,15 +177,34 @@
         -webkit-touch-callout: none;
         transition: background-color 150ms linear;
       }
-      /* The 90° turn, in both the legacy and the modern spelling: the class
-         the original used is now `rotate`, and a browser that only knows the
-         old one still gets the same look. */
+      /* The 90° turn.
+         *
+         * ONE property, never two. The `rotate` property and the `transform`
+         * property are *different transform functions*, and a browser
+         * composes them: setting both to 90deg rotates by 180deg, and the
+         * reading renders upside down. Measured in Chromium, on a 200x40 box
+         * with a marker on its left edge:
+         *
+         *   transform:rotate(90deg)  -> marker at (80, -80)   90 deg, correct
+         *   rotate:90deg              -> marker at (80, -80)   identical
+         *   both                      -> marker at (180, 0)   180 deg, wrong
+         *
+         * The original set one (`rotate: 90deg`, in its Tailwind build) and
+         * this set two, "for a browser that only knows the old one" — which is
+         * not how it works. `transform: rotate()` is understood by every
+         * browser that has ever run this app, so the fallback bought nothing
+         * and cost the orientation.
+         *
+         * `transform` is used rather than `rotate` so the rotation still
+         * applies in a browser without the independent `rotate`/`translate`
+         * properties (Safari before 14.1), which is a real gap and the reason
+         * to prefer the older spelling here.
+         */
       .panel .reading {
         display: block;
         font-size: clamp(2rem, 12vw, 4.5rem);
         font-weight: 700;
         font-variant-numeric: tabular-nums;
-        rotate: 90deg;
         transform: rotate(90deg);
       }
       .panel[data-state="active"] {
@@ -190,6 +212,27 @@
       }
       .panel[data-state="flagged"] {
         background: var(--panel-flag);
+      }
+      /* Outward, not inward.
+       *
+       * The phone lies flat between the two players. The top edge of the
+       * screen faces the player above it, the bottom edge faces the player
+       * below it, so each panel's reading has to be turned to face *outward*
+       * — away from the device's centre line, toward the person who owns it.
+       * That means the two panels turn in OPPOSITE directions: the top one
+       * clockwise, the bottom one anticlockwise. Rotating both the same way
+       * makes them face each other across the table, which is the mirror of
+       * what a two-sided clock is for — and it is wrong for a player who has
+       * to turn their head to read their own time.
+       *
+       * `panel-0` is the first row, so it is the one the player at the top
+       * edge is looking at, and it turns clockwise (90deg). `panel-1` is the
+       * second row, and turns anticlockwise (270deg). Both buttons are
+       * centred between the panels, so they turn to match `panel-0` — they
+       * are the shared controls and neither player owns them.
+       */
+      #panel-1 .reading {
+        transform: rotate(270deg);
       }
 
       /* The two buttons sit over the panels but must not swallow the taps
@@ -209,7 +252,10 @@
         display: none;
       }
       #controls button {
-        rotate: 90deg;
+        /* One property, for the same reason as the readings: `rotate` and
+           `transform` compose, and setting both turns the label 180deg. The
+           buttons are centred on the device's midline, so they take the top
+           panel's direction. */
         transform: rotate(90deg);
         pointer-events: auto;
         font-family: inherit;
@@ -329,7 +375,8 @@
       </p>
     </div>
 
-    <!-- Pause and Back, rotated to match the readings. -->
+    <!-- Pause and Back, rotated to match the top panel: they sit on the
+         device's midline, so neither player owns them. -->
     <div id="controls" hidden>
       <button id="pause" type="button">Pause</button>
       <button id="back" type="button">Back</button>

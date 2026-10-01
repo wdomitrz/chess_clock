@@ -508,12 +508,19 @@ fn start_game(app: &Shared) {
 }
 
 /// A tap on a panel: a start on the first tap of a game, a move after that.
+///
+/// Which clock the first tap starts is the original's rule and it is not the
+/// obvious one — it is the *opponent's*, as `clock` implements — but this
+/// layer does not need to care: the anchor below is taken from
+/// `game.on_clock`, whatever that turned out to be.
 fn tap_panel(app: &Shared, player: Player) {
     let mut state: RefMut<App> = app.borrow_mut();
     match state.game.tap(player) {
         Tap::Started => {
-            // The first tap of a game *starts* a clock; it does not end a
-            // move, so there is nothing to settle.
+            // The first tap of a game *starts* a clock — the other
+            // player's, as the original does it; `clock` decides which,
+            // and this layer never has to know. It does not end a move,
+            // so there is nothing to settle.
         }
         Tap::Moved => {
             // A new move has begun, so the increment owed by the last one is

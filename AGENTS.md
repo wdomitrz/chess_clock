@@ -186,8 +186,29 @@ large touch targets on the screen.
 
 **The rules**, all in `src/clock.rs` and all unit-tested:
 
-- The first tap on a panel starts *that* player's clock — whoever is sitting
-  there opens, which is why the panels show no active highlight while armed.
+- The first tap on a panel starts the **other** player's clock. This is
+  counter-intuitive, so it is worth saying why, and worth saying where it
+  came from: the original's two handlers each opened the game on the *other*
+  panel —
+
+  ```js
+  playerDivs[0].addEventListener("click", () => {
+    if (!isRunning && currentPlayer === null) {
+      currentPlayer = 1; // Start with Player 1's timer
+  ```
+
+  — and that is every version of `app.js` in this repository's history,
+  `71a743b` through `4d5dff6`. With the device lying flat, the top panel is
+  nearest one player and the bottom nearest the other, so tapping *your own*
+  clock is how you tell your opponent to go first: the two panels are
+  unlabelled, so this cross-wiring is the only thing that says who opens.
+  The panels show no active highlight while armed for the same reason.
+
+  This rewrite shipped the opposite rule and documented it as a port
+  decision, with a unit test pinning it — the failure this file already
+  records twice, below and under "Orientation": an invariant invented to
+  make a behaviour look principled while the thing being ported sat unread
+  in the repository's own history.
 - After that, only a tap on the **running** panel is a move. A tap on the
   waiting panel does nothing, so the increment cannot be farmed.
 - **Fischer** pays the full increment to the player who just moved, however
@@ -377,13 +398,21 @@ failure than an opaque `unreachable`, and it is a failure someone can act on.
 
 `cargo test --locked`, no browser and no external tool.
 
-`src/clock.rs` carries 35 unit tests: the increment rules including the Bronstein
+`src/clock.rs` carries 36 unit tests: the increment rules including the Bronstein
 cap swept across increments and spends, the three formatter branches and their
 boundaries (59:59 against 1:00:00, the truncation at 9.999 s, the four-character
 padding), and every transition of the state machine — first tap, idle tap,
 pause and resume, flagging from either side, a finished game accepting nothing,
 re-arming, and what a tap reports — because the caller has to know, and
 getting it wrong meant the increment was never paid (see above).
+
+Two of them exist because the suite was *green and the app was wrong*. The
+first-tap tests pin the cross-wiring above, and they are mutation-checked in
+the only way that counts: reintroducing `let started = player;` turns
+nineteen of the thirty-six red, `the_first_tap_starts_the_opponents_clock`
+among them. The second, `the_cap_is_against_this_move_not_the_whole_game`,
+exists because the earlier version of this file argued its way to the wrong
+answer twice on the orientation and then wrote tests shaped to fit.
 
 `tests/shell.rs` asserts the invariants of the committed shell — including the
 panel rotation, which is the one visual property that no amount of unit testing

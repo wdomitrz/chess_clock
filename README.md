@@ -9,8 +9,9 @@ dependency on this repository — any file host can serve it.
 
 The device lies flat on the table between the two players, so each clock
 reads sideways to the screen and upright to its player. The first tap on a
-panel starts that player's clock; after that, tapping the running player's
-panel hands the turn over and pays the increment.
+panel starts the *other* player's clock — tap your own clock to send your
+opponent first — and after that, tapping the running player's panel hands the
+turn over and pays the increment.
 
 AGPL-3.0-only. See `LICENSE`.
 

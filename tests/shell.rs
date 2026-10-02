@@ -1415,17 +1415,19 @@ fn strip_yaml_comments(source: &str) -> String {
         .join("\n")
 }
 
-/// A deploy that can run from any branch is a deploy a stranger can run.
+/// A deploy that can run from any branch is a deploy a stranger can run, and
+/// one that can run from any *repository* is a deploy that publishes the fork.
 ///
 /// `pages: write` and `id-token: write` are the two permissions that make a
 /// GitHub Actions job able to overwrite the live site, and the token behind
 /// them is minted for the repository however the workflow was reached. The
 /// project *wants* an automatic deploy on every merge to master -- that is the
 /// point, and it is why nobody has to remember to publish. What it does not
-/// want is that same power on every other ref, so the invariant asserted here
-/// is the narrow one that survives the convenience: master is the only ref
-/// that can reach the live site, and the publishing permissions live in the
-/// one job that is gated on it.
+/// want is that same power on every other ref, or in the fork, so the
+/// invariant asserted here is the narrow one that survives the convenience:
+/// master of the upstream repository is the only thing that can reach the live
+/// site, and the publishing permissions live in the one job that is gated on
+/// it.
 #[test]
 fn only_master_can_reach_the_live_site() {
     let Some(pages) = workflow("pages.yml") else {
@@ -1459,6 +1461,54 @@ fn only_master_can_reach_the_live_site() {
     assert!(
         deploy_job.contains("if:") && deploy_job.contains("github.ref == 'refs/heads/master'"),
         "the `deploy` job must be gated on the build being for master",
+    );
+
+    // ... and it must ALSO be gated on not being a fork. This file is
+    // byte-identical in `wdomitrz/chess_clock` and in its fork
+    // `bot-git-ai/chess_clock`, so a gate that tests only the branch name
+    // cannot tell the two repositories apart: both have a `master`, and a
+    // push to the fork's master would try to publish. Two things then go
+    // wrong, and the first is the one that happens. A fork has no Pages site
+    // of its own until someone enables one by hand, so every push to fork
+    // master dies with "Creating Pages deployment failed ... Ensure GitHub
+    // Pages has been enabled" -- three consecutive red runs on 2026-10-02
+    // before this gate existed. And if Pages were enabled there, the fork
+    // would serve its own copy, which drifts from the published site as soon
+    // as the two masters diverge -- which they have already.
+    //
+    // `github.event.repository.fork` is the discriminator because it needs no
+    // configuration: it is supplied by the event, false upstream and true in
+    // the fork. The obvious alternative, a repository Actions variable, has
+    // the failure mode this assertion exists to prevent -- it would have to be
+    // set on the *upstream* repository to publish, and no account but the
+    // user's can do that, so the gate would ship as silently off on the one
+    // repository where it matters.
+    // Read the gate out of the workflow with its comments stripped, or the
+    // comment block above the `if:` -- which names both halves of the gate
+    // while explaining it -- would satisfy this assertion on its own. That is
+    // not hypothetical: it is the mistake the `RUSTFLAGS` assertion in this
+    // same file was shipped with, and it shipped.
+    let live = strip_yaml_comments(&pages);
+    let live_gate = live
+        .split("\n  deploy:")
+        .nth(1)
+        .and_then(|job| job.split_once("if:").map(|(_, after)| after))
+        .expect("the `deploy` job must have an `if:` gate");
+    assert!(
+        live_gate.contains("!github.event.repository.fork"),
+        "the `deploy` job must be gated on `!github.event.repository.fork`; this workflow is \
+         byte-identical in the fork `bot-git-ai/chess_clock`, so a branch-name-only gate \
+         publishes from the fork too -- failing with 'Ensure GitHub Pages has been enabled' \
+         until Pages is enabled there, and serving a divergent copy afterwards",
+    );
+    // The two halves are one condition, not two jobs: an `if:` per job would
+    // be an AND across two independent gates, and a `build`-job gate would
+    // silently stop the *build* from running on the fork rather than just its
+    // publish, which is the opposite of what this is for.
+    assert!(
+        live_gate.contains("github.ref == 'refs/heads/master'"),
+        "the fork rule must extend the master gate, not replace it: `deploy` must be one \
+         `if:` testing both `github.ref` and `github.event.repository.fork`",
     );
 
     // And the permissions that can actually publish must be scoped to that job

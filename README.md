@@ -67,11 +67,11 @@ per host.
 `.github/workflows/pages.yml` builds the site and deploys it to Pages. It runs
 the same two steps, in the same order, as the build above.
 
-Deploys are **deliberate, not automatic**: trigger one by hand from the Actions
-tab, or push a `v*` tag. Pushing to `master` builds and tests but does not
-publish, so the live site is not moved by a commit that merely happens to
-merge — the `github-pages` environment still applies the repository's own
-review and branch rules on top.
+Deploys are **automatic on `master`**: every commit that lands there is built
+and published, and a push to any other branch builds without publishing. There
+is nothing to tag and nothing to click. The `github-pages` environment still
+applies the repository's own review and branch rules on top, so a protected
+branch can hold the live site back.
 
 Turning the site on in the repository: **Settings → Pages → Source → GitHub
 Actions**. The build needs a runner that can produce the wasm; the Actions

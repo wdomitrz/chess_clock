@@ -1144,41 +1144,50 @@ fn the_pages_build_generates_bindings_for_the_pinned_runtime() {
     );
 }
 
-/// A deploy that can run from a pull request is a deploy a stranger can run.
+/// A deploy that can run from any branch is a deploy a stranger can run.
 ///
 /// `pages: write` and `id-token: write` are the two permissions that make a
 /// GitHub Actions job able to overwrite the live site, and the token behind
 /// them is minted for the repository however the workflow was reached. The
-/// guard that matters is the job's `if:` -- pull requests run workflows from
-/// forks with a read-only token and no Pages environment, so a deploy job that
-/// is not gated will fail at authorization on a fork PR rather than at the
-/// check that means something. Asserting the gate is here means the guard
-/// cannot be deleted quietly, and the failure it would cause is stated in the
-/// job that would hit it.
+/// project *wants* an automatic deploy on every merge to master -- that is the
+/// point, and it is why nobody has to remember to publish. What it does not
+/// want is that same power on every other ref, so the invariant asserted here
+/// is the narrow one that survives the convenience: master is the only ref
+/// that can reach the live site, and the publishing permissions live in the
+/// one job that is gated on it.
 #[test]
-fn only_a_deliberate_run_can_deploy() {
+fn only_master_can_reach_the_live_site() {
     let Some(pages) = workflow("pages.yml") else {
         return;
     };
 
-    // The workflow's triggers. A bare `push:` to master would publish on every
-    // commit that passes the build, which is not the same thing as a decision
-    // to publish.
+    // The trigger must be the named branch, not a bare `push:`. A bare
+    // `push:` deploys from every branch that exists, including a contributor's
+    // feature branch, and it also changes what `on:` means for pull requests --
+    // which is the opposite of the intent.
     assert!(
-        !pages.contains("- master"),
-        "pages.yml must not deploy on every push to master; publishing is a deliberate act \
-         (workflow_dispatch, or a version tag)",
+        pages.contains("branches: [master]"),
+        "pages.yml must trigger on `branches: [master]`, not a bare `push:`; a bare push \
+         deploys from every branch, including other people's",
+    );
+    // A tag trigger alongside the branch trigger would publish a version that
+    // was never on master.
+    assert!(
+        !pages.contains("tags:"),
+        "pages.yml must not also deploy on tags; a tagged commit that never reached master \
+         would be published to the live site",
     );
 
     // The deploy job's gate, named so the assertion cannot be satisfied by a
-    // gate on some other job.
+    // gate on some other job. This is the check that actually holds when the
+    // trigger is widened by accident.
     let deploy_job = pages
         .split("\n  deploy:")
         .nth(1)
         .expect("pages.yml must have a `deploy:` job");
     assert!(
-        deploy_job.contains("if:") && deploy_job.contains("workflow_dispatch"),
-        "the `deploy` job must be gated on workflow_dispatch or a version tag",
+        deploy_job.contains("if:") && deploy_job.contains("github.ref == 'refs/heads/master'"),
+        "the `deploy` job must be gated on the build being for master",
     );
 
     // And the permissions that can actually publish must be scoped to that job

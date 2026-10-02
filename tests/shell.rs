@@ -1132,16 +1132,91 @@ fn the_pages_build_generates_bindings_for_the_pinned_runtime() {
     );
     let version = expected.trim_start_matches('=').trim_matches('"');
 
-    // The version has to appear in the job that generates the bindings, as the
+    // The version has to reach the job that generates the bindings, as the
     // `version=` it installs -- not merely somewhere in the file, where a
     // mention in a comment would satisfy this and the job would still install
-    // whatever else it found.
-    let installs = format!("version=\"{version}\"");
+    // whatever else it found. Two spellings are accepted, because `build.yml`
+    // sets it in `env:` and reads it back as a shell variable, and a literal
+    // is equally correct: what is rejected is a job that names neither.
+    let literal = format!("version=\"{version}\"");
+    let indirect = "version=\"$WASM_BINDGEN_VERSION\"";
     assert!(
-        pages.contains(&installs),
-        "pages.yml must install wasm-bindgen {version} (`{installs}`); it cannot drift from the \
-         Cargo.toml pin, or the site fails to start in the browser and nowhere else",
+        pages.contains(&literal) || pages.contains(indirect),
+        "pages.yml must install wasm-bindgen {version} (`{literal}` or `{indirect}`); it cannot \
+         drift from the Cargo.toml pin, or the site fails to start in the browser and nowhere else",
     );
+    // A version passed through `env:` is only a single source of truth if the
+    // variable is actually declared at the same literal value. An unset
+    // variable expands to nothing, and the job would install the empty string
+    // -- which passes every check here and publishes bindings for no runtime.
+    if pages.contains(indirect) {
+        let declared = format!("WASM_BINDGEN_VERSION: {version}");
+        assert!(
+            pages.contains(&declared),
+            "pages.yml installs $WASM_BINDGEN_VERSION but never declares it as {version}; an \
+             undeclared variable expands to nothing and the generator step installs nothing",
+        );
+    }
+}
+
+/// The wake-lock cfg is a compiler flag, and only a flag on the compiling
+/// invocation turns it on.
+///
+/// `build.rs` emits `cargo:rustc-cfg=web_sys_unstable_apis` for the wasm
+/// target, and that reads like it makes the flag unnecessary. It does not:
+/// the wasm build fails without `RUSTFLAGS` in the environment, which is not
+/// obvious from the script and cost this workflow's first run its deploy. The
+/// two mechanisms are not substitutes, so the workflow has to carry the
+/// variable whatever the script does.
+///
+/// Without it the job dies at the first wasm build with "cannot find
+/// `WakeLockSentinel` in crate `web_sys`", naming no feature to add.
+#[test]
+fn the_pages_build_passes_the_wake_lock_cfg() {
+    let Some(pages) = workflow("pages.yml") else {
+        return;
+    };
+    // A commented-out `# RUSTFLAGS:` is not a setting. The check has to read
+    // the workflow's own lines with comments removed, or the exact mutation
+    // that caused this bug -- commenting the line out instead of deleting it
+    // -- satisfies the assertion and ships a job that cannot build.
+    let live = strip_yaml_comments(&pages);
+    assert!(
+        live.contains("RUSTFLAGS: --cfg=web_sys_unstable_apis"),
+        "pages.yml must set RUSTFLAGS=--cfg=web_sys_unstable_apis; build.rs's cargo:rustc-cfg \
+         does not reach the crate it is emitted from, and the wasm build fails without this with \
+         `cannot find WakeLockSentinel in crate web_sys`",
+    );
+    // And it must be in the top-level `env:`, not on one step: the clippy run
+    // builds the wasm lib outside a build.rs pass, so a step-scoped variable
+    // would leave that half without the cfg. Top-level keys are at two-space
+    // indentation; anything deeper belongs to a job or a step.
+    let top_level = live
+        .lines()
+        .find(|line| line.trim_start().starts_with("RUSTFLAGS:"))
+        .expect("RUSTFLAGS must be set somewhere in the workflow");
+    assert!(
+        top_level.starts_with("  RUSTFLAGS:") && !top_level.starts_with("   "),
+        "RUSTFLAGS must be set in the workflow's top-level `env:`, not on a single step, so the \
+         clippy wasm run sees it too (found: {top_level:?})",
+    );
+}
+
+/// The workflow with its comments removed.
+///
+/// A `#` inside a quoted string is not a comment, and a `#` in a value is not
+/// one either -- but this workflow quotes nothing in the keys it is read for
+/// and carries no `#` in any value it depends on, so a line-wise cut at the
+/// first `#` is enough and a YAML parser is not worth a dependency.
+fn strip_yaml_comments(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| match line.find('#') {
+            Some(index) => &line[..index],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A deploy that can run from any branch is a deploy a stranger can run.

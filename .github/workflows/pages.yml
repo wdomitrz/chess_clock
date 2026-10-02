@@ -262,15 +262,15 @@ jobs:
           cargo clippy --locked --lib --target wasm32-unknown-unknown -- -D warnings
 
       - name: Upload the Pages artifact
-        id: pages
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           # `upload-pages-artifact` is not `upload-artifact`. The Pages
-          # artifact is a single named tarball the deploy action expects by
-          # name, and this action also requires a `pages` output, whose
-          # artifact id the deploy step passes back in. A plain upload to the
-          # run's artifacts produces a green build and then a deploy that
-          # cannot find what it was given.
+          # artifact is a single tarball the deploy action then finds *by
+          # name*, and a plain upload into the run's artifacts produces a
+          # green build followed by a deploy that cannot find what it was
+          # given. `github-pages` is this action's default name and is stated
+          # here so the deploy step's `artifact_name` has something to match.
+          name: github-pages
           path: dist/
 
   deploy:
@@ -302,8 +302,14 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
-          # The artifact id the build job produced, not a name to re-find by:
-          # the build ran in a different job, and its artifacts are in that
-          # job's scope, so the id is the only handle that is guaranteed to
-          # still resolve.
-          artifact_id: pages
+          # By *name*, not by id. `deploy-pages` v5 has no `artifact_id` input
+          # -- it warns `Unexpected input(s) 'artifact_id'` and falls back to
+          # this same default -- so passing one is at best ignored and at
+          # worst names an artifact that does not exist.
+          #
+          # The name is stated rather than left to the default so the two
+          # sides are visibly the same string. `upload-pages-artifact` defaults
+          # to `github-pages` and so does this input; a mismatch between them
+          # produces a deploy that finds no artifact, and naming it on both
+          # sides makes that mismatch a diff rather than a 404 at run time.
+          artifact_name: github-pages

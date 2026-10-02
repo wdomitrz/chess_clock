@@ -1279,6 +1279,62 @@ fn only_master_can_reach_the_live_site() {
     );
 }
 
+/// The deploy has to be handed something the upload actually produced.
+///
+/// `deploy-pages` v5 takes `artifact_name`. There is no `artifact_id` input:
+/// passing one is reported as `Unexpected input(s) 'artifact_id'` and the
+/// action falls back to its own default, which is only the right answer while
+/// the upload side also defaults to the same string. Change one side and the
+/// deploy finds no artifact and fails with a bare `HttpError: Not Found` --
+/// which says nothing about the artifact, so the cause has to be read out of
+/// the workflow, not out of the error.
+#[test]
+fn the_deploy_is_handed_the_artifact_the_build_uploaded() {
+    let Some(pages) = workflow("pages.yml") else {
+        return;
+    };
+    let live = strip_yaml_comments(&pages);
+
+    // The input that v5 does not have. Its presence is a warning at run time
+    // and never an error, so nothing else would ever report it.
+    assert!(
+        !live.contains("artifact_id:"),
+        "pages.yml passes `artifact_id` to deploy-pages v5, which has no such input; it is \
+         warned about and ignored, leaving the deploy to guess the artifact name",
+    );
+
+    // Both sides name the artifact the same way. Read the two keys out of the
+    // live text rather than asserting on a fixed string, so the invariant is
+    // the agreement and not the particular name.
+    //
+    // Only the two are read, and only where they are the artifact's own keys:
+    // the file also carries the workflow's `name:` and every step's `name:`,
+    // and a plain prefix match picks up whichever of those comes first.
+    // `artifact_name:` is unique, and the upload's `name:` is the one indented
+    // ten spaces -- a step's own `name:` is eight.
+    let name_of = |key: &str, indent: usize| {
+        live.lines().find_map(|line| {
+            let prefix = format!("{}{key}: ", " ".repeat(indent));
+            let rest = line.strip_prefix(prefix.as_str())?;
+            Some(rest.trim().trim_matches('"').to_owned())
+        })
+    };
+    let uploaded = name_of("name", 10).unwrap_or_else(|| {
+        panic!("pages.yml must state the upload step's artifact `name:` so the deploy can match it")
+    });
+    let deployed = name_of("artifact_name", 10).unwrap_or_else(|| {
+        panic!(
+            "pages.yml must pass `artifact_name:` to deploy-pages, or it uses a default that \
+                can drift from the upload"
+        )
+    });
+    assert_eq!(
+        uploaded, deployed,
+        "the artifact the build uploads ({uploaded:?}) and the one the deploy asks for \
+         ({deployed:?}) must be the same name",
+    );
+}
+
 #[cfg(test)]
 mod sha256 {
     //! A minimal SHA-256, for the one digest in the suite.

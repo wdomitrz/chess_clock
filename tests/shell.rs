@@ -264,6 +264,141 @@ fn the_shell_respects_platform_preferences() {
     );
 }
 
+/// Every rule in the stylesheet that sets a `display`, as `(selector, value)`.
+///
+/// A declaration inside a bare `{ ... }` block has no selector of its own, so
+/// it is attached to the selector that preceded it. That is enough for the
+/// question being asked -- which `display` a given element ends up with -- and
+/// deliberately not a CSS parser.
+fn display_rules(page: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut selector = String::new();
+    for line in page.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(open) = line.find('{') {
+            let head = line[..open].trim();
+            if !head.is_empty() {
+                selector = head.to_string();
+            }
+            // `selector { display: none }` written on one line.
+            if let Some(value) = declaration(&line[open + 1..], "display") {
+                out.push((selector.clone(), value));
+            }
+        } else if line == "}" {
+            selector.clear();
+        } else if let Some(value) = declaration(line, "display") {
+            if !selector.is_empty() {
+                out.push((selector.clone(), value));
+            }
+        }
+    }
+    out
+}
+
+/// The value of `property` in a run of CSS, or `None` if it is not set there.
+/// The value stops at the `!important` marker, so a caller can ask separately
+/// whether it was marked.
+fn declaration(css: &str, property: &str) -> Option<String> {
+    let index = css.find(property)?;
+    let after = css[index + property.len()..].trim_start();
+    let after = after.strip_prefix(':')?.trim_start();
+    let end = after
+        .find(|c: char| c == ';' || c == '}' || c == '!' || c.is_whitespace())
+        .unwrap_or(after.len());
+    Some(after[..end].trim().to_string())
+}
+
+/// Whether the `[hidden]` rule's `display` declaration is marked `!important`.
+fn hidden_display_is_important(page: &str) -> bool {
+    let mut selector = String::new();
+    for line in page.lines() {
+        let line = line.trim();
+        if let Some(open) = line.find('{') {
+            let head = line[..open].trim();
+            if !head.is_empty() {
+                selector = head.to_string();
+            }
+            if selector.contains("[hidden]") {
+                if let Some(index) = line[open + 1..].find("display") {
+                    return line[open + 1..][index..].contains("!important");
+                }
+            }
+        } else if line == "}" {
+            selector.clear();
+        } else if selector.contains("[hidden]") {
+            if let Some(index) = line.find("display") {
+                return line[index..].contains("!important");
+            }
+        }
+    }
+    false
+}
+
+/// A screen hidden with the `hidden` attribute must leave the document flow.
+///
+/// The app switches screens by toggling that attribute alone, so `hidden` is
+/// load-bearing for layout here and not merely for accessibility. It cannot be
+/// left to win on specificity: this file gives `#game` an id selector, which
+/// beats the `.screen[hidden]` that used to hide it. So the hidden game screen
+/// stayed a full `100dvh` block in the flow, and the setup screen grew a
+/// scroll bar that scrolled down to the game screen sitting behind it.
+///
+/// Asserting that a `[hidden]` rule merely *exists* cannot catch that -- it did
+/// exist, and it lost. So assert the thing that was actually wrong: nothing
+/// that sets a screen's `display` may out-specify the `[hidden]` rule.
+#[test]
+fn a_hidden_screen_cannot_be_beaten_by_a_more_specific_display_rule() {
+    let page = strip_comments(&shell());
+    let rules = display_rules(&page);
+
+    let (hidden_selector, hidden_value) = rules
+        .iter()
+        .find(|(selector, _)| selector.contains("[hidden]"))
+        .unwrap_or_else(|| {
+            panic!("the shell must carry a [hidden] rule: the app hides a screen by attribute")
+        });
+
+    assert_eq!(
+        hidden_value, "none",
+        "`{hidden_selector}` must set display: none, or a hidden screen still renders"
+    );
+
+    // `.screen[hidden]` (0,2,0) is too weak to survive `#game` (1,0,0). The
+    // one declaration that cannot lose, whatever id selector is added later,
+    // is the one `!important` makes win.
+    assert!(
+        hidden_display_is_important(&page),
+        "the [hidden] rule must set `display: none !important` -- without it, \
+         any element given an id selector stops being hideable by attribute"
+    );
+
+    // And spell the failure out at the elements that actually broke, so the
+    // message names them if the general rule is ever weakened again. Any rule
+    // that matches `#game` — bare, or qualified with `[hidden]` or a class —
+    // is an opponent, and must not be the one laying the element out.
+    for (id, expected) in [("game", "grid"), ("controls", "flex")] {
+        let given = rules
+            .iter()
+            .filter(|(selector, _)| {
+                selector
+                    .split(',')
+                    .any(|part| part.trim().starts_with(&format!("#{id}")))
+            })
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            given,
+            vec![expected],
+            "#{id} must be laid out with `display: {expected}` from exactly one \
+             rule -- a second one (say `#{id}[hidden]`) would re-add the \
+             element to the flow while it is hidden"
+        );
+    }
+}
+
 /// The service worker is a committed template with exactly one placeholder, and
 /// `build.rs` substitutes it. A template with no placeholder would mean the
 /// cache never invalidates; a second one would mean the substitution is not

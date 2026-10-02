@@ -11,6 +11,12 @@
 # permissions, and the thing that can overwrite the live site exists only on
 # the default branch.
 #
+# What it does NOT do is deploy on every push anywhere: `on:` is `branches:
+# [master]`, and the `deploy` job repeats that test for itself. A feature
+# branch therefore runs the whole build -- wasm, bindings, the eight-file site
+# check, tests, clippy on both targets -- and still cannot publish, so the
+# thing that overwrites the live site is reachable from exactly one ref.
+#
 # `build.yml` already runs the two build steps in the order AGENTS.md requires
 # and inspects the result. This workflow reuses nothing from it and builds
 # again rather than passing the artifact across: `upload-artifact` does not
@@ -30,13 +36,11 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  # Deploys are a deliberate act, not a side effect of a push: `build.yml`
-  # already covers every push to master, and a deploy that follows every commit
-  # puts the live site at the mercy of any commit that passes CI. So this runs
-  # on demand, and on tags, where publishing a version is the explicit intent.
-  workflow_dispatch:
+  # Every commit that lands on master is deployed, and nothing else. A push to
+  # any other branch builds but does not publish, so a feature branch is
+  # reviewable without moving the live site.
   push:
-    tags: ['v*']
+    branches: [master]
 
 permissions:
   contents: read
@@ -250,11 +254,13 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    # Only the tagged or manually dispatched run publishes. A pull request from
-    # a fork gets no token with `pages: write`, and asking for one it cannot
-    # have would make the job fail at authorization instead of at the check
-    # that matters.
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    # Only a build for master publishes. The trigger already says `branches:
+    # [master]`, so this is belt and braces -- but the trigger is one line
+    # above the job and this is the line that decides whether the live site is
+    # overwritten, and a pull request from a fork gets no token with
+    # `pages: write` either way. Being explicit here means a trigger widened
+    # later does not silently hand every branch a publish button.
+    if: github.ref == 'refs/heads/master'
     needs: build
     runs-on: ubuntu-latest
 

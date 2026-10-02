@@ -15,9 +15,9 @@ turn over and pays the increment.
 
 AGPL-3.0-only. See `LICENSE`.
 
-This is a standalone, private repository. It began as the JavaScript PWA
-`wdomitrz/chess_clock` and keeps that app's behaviour, layout and icon; the
-implementation is now Rust. See `AGENTS.md` for the contract and the build.
+This began as the JavaScript PWA `wdomitrz/chess_clock` and keeps that app's
+behaviour, layout and icon; the implementation is now Rust. See `AGENTS.md` for
+the contract and the build.
 
 ## Build
 
@@ -55,6 +55,27 @@ Then serve `dist/` with anything:
 ```
 python3 -m http.server --directory dist
 ```
+
+The site is self-contained and location-independent: every path it references
+is relative to the page, and the service worker resolves its own directory from
+`self.location`. So the same `dist/` works at a domain root, under a
+subdirectory, or on GitHub Pages at `/chess_clock/` — nothing needs rewriting
+per host.
+
+## Deploy to GitHub Pages
+
+`.github/workflows/pages.yml` builds the site and deploys it to Pages. It runs
+the same two steps, in the same order, as the build above.
+
+Deploys are **deliberate, not automatic**: trigger one by hand from the Actions
+tab, or push a `v*` tag. Pushing to `master` builds and tests but does not
+publish, so the live site is not moved by a commit that merely happens to
+merge — the `github-pages` environment still applies the repository's own
+review and branch rules on top.
+
+Turning the site on in the repository: **Settings → Pages → Source → GitHub
+Actions**. The build needs a runner that can produce the wasm; the Actions
+runner already has the pinned toolchain.
 
 ## Test
 

@@ -5,7 +5,7 @@ name = "chess_clock"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
-description = "Private two-player Fischer/Bronstein chess clock PWA, in Rust"
+description = "Two-player Fischer/Bronstein chess clock PWA, in Rust"
 
 [lib]
 name = "chess_clock"

@@ -9,9 +9,10 @@ with no server and no runtime dependency on this repository.
 
 AGPL-3.0-only. See `LICENSE`.
 
-This is a standalone, **private** repository. It was seeded with the history of
-the public `wdomitrz/chess_clock`; `upstream` may be read, `origin` is here,
-and it is never made public.
+This repository is seeded with the history of the public `wdomitrz/chess_clock`
+and continues it. The app, its layout and its icon are the author's, from
+that JavaScript PWA; the implementation is now Rust, and the built site is
+published to GitHub Pages at `wdomitrz.github.io/chess_clock/`.
 
 ## Build and run
 

@@ -77,22 +77,34 @@ Enabling the four features is necessary and **not** sufficient. With them on
 and the cfg off, the build fails with
 `cannot find WakeLockSentinel in crate web_sys` and names no feature to add.
 
-So `build.rs` emits `cargo:rustc-cfg=web_sys_unstable_apis` for the wasm
-target. This is the only mechanism that actually reaches the crate:
+**`.cargo/config.toml` supplies the cfg**, and it is committed:
 
-* `RUSTFLAGS` as an environment variable works, but is one thing a builder has
-  to remember and one thing a fresh CI runner forgets;
-* a `[target.'cfg(...)'.rustflags]` table in `Cargo.toml` is **ignored** for
-  non-path dependencies — cargo emits `unused manifest key` and moves on;
-* `cargo:rustc-cfg` is the documented, supported way, and is scoped to the
-  build script's own target, so the host build and `cargo test` compile without
-  the flag and cannot be affected by it.
+```toml
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]
+```
 
-`RUSTFLAGS` therefore appears above only on the two commands that build the
-wasm lib *outside* a `build.rs` pass: the step 1 build (where it is redundant
-but harmless, and kept so the command is copy-pasteable) and the wasm `clippy`
-run. The flag is `--cfg=web_sys_unstable_apis` in one argument — cargo splits
-`RUSTFLAGS` on whitespace, so `-C cfg=web_sys_unstable_apis` fails with
+That is what makes the commands above work as printed — on this machine and
+on a fresh CI runner alike — with nothing to remember. The other two
+mechanisms that work are `RUSTFLAGS` in the environment, and neither carries
+the repo with it.
+
+**`build.rs` does NOT work, and the reason is not obvious.** It emits the same
+`cargo:rustc-cfg`, and a `compile_error!` probe inside the crate confirms the
+cfg *is* set on the crate itself — which is exactly why the technique looks
+like it works until the real error appears. `cargo:rustc-cfg` applies only to
+the **building package's own units**. `web-sys` is a registry dependency,
+compiled in its own unit, so the cfg never reaches it: the item the crate is
+looking for is not compiled at all. `[target.'cfg(...)'.rustflags]` in
+`Cargo.toml` is likewise ignored for non-path dependencies.
+
+So the flag is set three ways, and the first is the one that matters:
+`.cargo/config.toml` (automatic, travels with the repo), `RUSTFLAGS` in the
+workflow's top-level `env:` (belt and braces, and the mechanism a CI runner
+that cannot see the config file relies on), and `RUSTFLAGS` on the clippy wasm
+run, which builds the lib outside any config-driven pass. The flag is
+`--cfg=web_sys_unstable_apis` in **one** argument — cargo splits `RUSTFLAGS`
+on whitespace, so `-C cfg=web_sys_unstable_apis` fails with
 `unknown codegen option: cfg`.
 
 The alternative — binding the one method by hand with `js_sys` — is the

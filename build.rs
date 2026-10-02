@@ -96,16 +96,26 @@ fn main() {
         // this cfg the wasm build fails with "cannot find
         // `WakeLockSentinel` in crate `web_sys`" and names no feature to add.
         //
-        // It is set here rather than through `RUSTFLAGS` or a
-        // `[target.*.rustflags]` table because neither reaches this crate:
-        // `RUSTFLAGS` does not apply to build scripts and proc macros, and a
-        // manifest's `rustflags` key is ignored for non-path dependencies and
-        // (with `target-applies-to-host` defaults) is not consulted for the
-        // lib on a target-specific build at all. `cargo:rustc-cfg` is the
-        // mechanism that is actually guaranteed to reach the crate being
-        // compiled. The alternative — binding the one method by hand — is the
-        // shared spec's stated prohibition on a manual ABI, so it is not
-        // taken.
+        // The cfg that actually matters is NOT emitted here. It comes from
+        // `.cargo/config.toml`, and the reason is worth writing down because
+        // the two lines below make this look like the right answer:
+        // `cargo:rustc-cfg` applies only to the *building package's own
+        // units*. `web_sys` is a registry dependency, compiled in its own
+        // unit, so the cfg set here never reaches it — the items the crate
+        // needs are not compiled at all. A `compile_error!` probe inside this
+        // crate confirms the cfg IS set on this crate itself, which is exactly
+        // why the technique looks like it works until the real error appears.
+        //
+        // So the two lines below are a convenience for this crate's own source
+        // (which does gate on the cfg) and are *not* what makes the wasm build
+        // succeed. Do not remove them expecting the build to break, and do not
+        // rely on them expecting it to succeed either: the load-bearing
+        // setting is `.cargo/config.toml`, with `RUSTFLAGS` in the CI workflow
+        // as the second source.
+        //
+        // The alternative would have been binding the one method by hand,
+        // which is the shared spec's stated prohibition on a manual ABI, so it
+        // is not taken.
         //
         // The cfg is applied to the wasm build only, so the host build — and
         // therefore the `cargo test` that runs here — compiles the same code

@@ -41,11 +41,15 @@ writes the other six files and derives the service worker's cache version from
 the bytes of all of them, so **the order matters**: run step 2 first and the
 cache is pinned to whatever the previous build left behind.
 
-The `RUSTFLAGS` is not optional. The Screen Wake Lock API — all of it,
-including the `WakeLockSentinel` type — sits behind `web_sys_unstable_apis` in
-`web-sys` 0.3.105. `build.rs` sets the cfg for the wasm target so `cargo build`
-and `cargo test` work unaided; the variable is only needed for the `clippy`
-wasm run, which builds the lib outside a `build.rs` pass. See `AGENTS.md`.
+The wake-lock cfg comes from `.cargo/config.toml`, which is committed, so the
+commands above work as printed with nothing to remember. The Screen Wake Lock
+API — all of it, including the `WakeLockSentinel` type — sits behind
+`web_sys_unstable_apis` in `web-sys` 0.3.105, and `build.rs` **cannot** supply
+it: `cargo:rustc-cfg` reaches only the building package's own units, and
+`web-sys` is a registry dependency compiled in its own unit. The flag is
+`--cfg=web_sys_unstable_apis` in one argument. CI additionally sets
+`RUSTFLAGS` in the workflow's top-level `env:` as a second source. See
+`AGENTS.md`.
 
 `wasm-bindgen` must be exactly `0.2.128`, matching the `=0.2.128` pin in
 `Cargo.toml`; a mismatched generator emits bindings the runtime will not load.

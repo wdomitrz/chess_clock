@@ -692,6 +692,64 @@ fn no_build_artifact_is_committed() {
     }
 }
 
+/// The wake-lock cfg must travel with the repository, and the documentation
+/// must not claim otherwise.
+///
+/// `web_sys_unstable_apis` is behind a cfg, and `cargo:rustc-cfg` in `build.rs`
+/// does **not** supply it: that applies only to the building package's own
+/// units, and `web-sys` is a registry dependency compiled in its own unit, so
+/// the cfg never reaches it. The build then fails with five errors naming
+/// `WakeLockSentinel`, `WakeLockType` and `wake_lock`.
+///
+/// So `.cargo/config.toml` has to be committed, and the docs have to say it is
+/// what works. Asserting only the file's presence would let the prose drift
+/// back into claiming `build.rs` is sufficient — which is exactly what it did,
+/// and exactly what makes a fresh clone fail with the documented commands.
+#[test]
+fn the_wake_lock_cfg_travels_with_the_repository() {
+    // The committed config, and the flag in it.
+    let config = std::fs::read_to_string(root().join(".cargo/config.toml"))
+        .unwrap_or_else(|error| panic!("reading .cargo/config.toml: {error}"));
+    assert!(
+        config.contains("--cfg=web_sys_unstable_apis"),
+        ".cargo/config.toml must carry --cfg=web_sys_unstable_apis; without it a fresh clone \
+         cannot build the wasm target at all, because build.rs's cargo:rustc-cfg never reaches \
+         the web-sys dependency",
+    );
+    // Scoped to the wasm target: the host build compiles no web-sys code, and
+    // inheriting an unstable-API flag it has no use for is noise at best.
+    assert!(
+        config.contains("wasm32-unknown-unknown"),
+        ".cargo/config.toml must scope the flag to [target.wasm32-unknown-unknown]",
+    );
+
+    // And no document may claim `build.rs` is what makes the build work. The
+    // failure mode this guards is a reader trusting the prose and deleting the
+    // config file as redundant, which is not recoverable without CI.
+    for (name, text) in [
+        ("README.md", std::fs::read_to_string(root().join("README.md"))),
+        (
+            "AGENTS.md",
+            std::fs::read_to_string(root().join("AGENTS.md")),
+        ),
+    ] {
+        let text = text.unwrap_or_else(|error| panic!("reading {name}: {error}"));
+        let stripped = strip_comments(&text);
+        for lie in [
+            "`build.rs` sets the cfg for the wasm target",
+            "the only mechanism that actually reaches the crate",
+            "is guaranteed to reach the crate being",
+        ] {
+            assert!(
+                !stripped.contains(lie),
+                "{name} still claims that `build.rs` supplies the wake-lock cfg (\"{lie}\"). That \
+                 is false: cargo:rustc-cfg reaches only the building package's own units, and \
+                 web-sys is compiled in its own unit. See .cargo/config.toml.",
+            );
+        }
+    }
+}
+
 /// `dist/` has to be ignored, or a build would leave the next commit dirty.
 #[test]
 fn dist_is_ignored() {

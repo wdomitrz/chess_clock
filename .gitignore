@@ -1,0 +1,5 @@
+target/
+# Build output of `chess_clock` (`build.rs` plus the `wasm-bindgen` step).
+# Generated, never committed — `dist/` is the whole site and is reproducible
+# from the committed sources and the pinned toolchain.
+dist/

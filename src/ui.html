@@ -68,13 +68,20 @@
         overscroll-behavior: none;
       }
 
+      /* The [hidden] rules below MUST NOT lose to a more specific selector.
+         This app's screens are shown and hidden purely by the `hidden`
+         attribute (see `start_game` / `show_setup` in ui.rs), so `hidden` has
+         to beat every rule that gives a screen its display -- or a hidden
+         screen stays in the flow and the page grows a scroll bar.
+         */
+      [hidden] {
+        display: none !important;
+      }
+
       .screen {
         display: flex;
         height: 100dvh;
         padding: 1rem;
-      }
-      .screen[hidden] {
-        display: none;
       }
 
       /* --- setup --- */
@@ -234,9 +241,6 @@
         justify-content: center;
         gap: 5rem;
         pointer-events: none;
-      }
-      #controls[hidden] {
-        display: none;
       }
       #controls button {
         /* One property, for the same reason as the readings: `rotate` and

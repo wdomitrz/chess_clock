@@ -720,7 +720,6 @@ fn the_committed_manifest_is_well_formed_and_relative() {
             "{key} must be a #rrggbb colour, got {value:?}"
         );
     }
-    // Both install icons, declared at the sizes they are rasterized at.
     let icons = manifest["icons"].as_array().expect("an icon list");
     assert_eq!(icons.len(), 2, "one icon per install size");
     for (icon, size) in icons.iter().zip(["192x192", "512x512"]) {
@@ -757,7 +756,6 @@ fn the_icon_is_the_original_svg_untouched() {
         "assets/icon.svg must stay the author's original, byte for byte"
     );
 
-    // It is an SVG, it is the Material Symbols pawn, and it is transparent.
     let text = String::from_utf8(icon).expect("the icon is text");
     assert!(text.contains("<svg"), "the icon must remain an SVG");
     assert!(
@@ -842,7 +840,6 @@ fn no_build_artifact_is_committed() {
 /// and exactly what makes a fresh clone fail with the documented commands.
 #[test]
 fn the_wake_lock_cfg_travels_with_the_repository() {
-    // The committed config, and the flag in it.
     let config = std::fs::read_to_string(root().join(".cargo/config.toml"))
         .unwrap_or_else(|error| panic!("reading .cargo/config.toml: {error}"));
     assert!(

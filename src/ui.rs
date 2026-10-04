@@ -201,15 +201,12 @@ pub fn start_when_ready() {
 
 /// Tell the user the app did not start, in the shell's own words.
 ///
-/// The shell already owns a failure message for exactly this, and reusing it
-/// keeps one copy of the wording. The alternative — a `panic!` — is what
-/// produced the opaque `unreachable` in the first place: a panic inside a
-/// start function aborts instantiation, and the page is left showing a form
-/// that does nothing. A message is a better failure than a trap, and a message
-/// that says so is a failure someone can act on.
-///
-/// Deliberately silent about the cause in the rendered text: the interface
-/// names what happened, not what is under the hood.
+/// The shell already owns a failure message for this, and reusing it keeps one
+/// copy of the wording. A `panic!` would instead abort instantiation and
+/// leave the page showing a form that does nothing — the opaque `unreachable`
+/// this function exists to replace. The rendered text names what happened, not
+/// what is under the hood; the cause goes to the console, where a developer
+/// will look and a player will not.
 fn report_start_failure(reason: &str) {
     if let Some(message) = window()
         .document()
@@ -223,7 +220,6 @@ fn report_start_failure(reason: &str) {
             .unwrap_or("Chess Clock could not start.");
         message.set_text_content(Some(&format!("{text} ({reason})")));
     }
-    // And to the console, where a developer will look and a player will not.
     web_sys::console::error_1(&JsValue::from_str("chess_clock: could not start"));
 }
 
@@ -278,17 +274,12 @@ pub fn mount() {
             // A *weak* self-reference, upgraded where it is used.
             //
             // This was a strong `Rc`, upgraded inside the constructor, and it
-            // panicked on every single load: `new_cyclic` runs its closure
-            // *before* the `Rc` is constructed, so no strong reference to it
-            // exists yet and `upgrade()` on the `Weak` returns `None` by
-            // construction. The `.expect()` claimed new_cyclic "hands the
-            // closure a live weak reference" and the opposite was true.
-            //
-            // Worth writing down, because nothing about it is visible in the
-            // source: the old line read as a self-reference with a redundant
-            // `.expect()`, the same shape as the correct line one line below
-            // it. Only a run in a real browser found it. Weak is also right on
-            // the merits -- a callback should not keep alive the thing it is a
+            // panicked on every load: `new_cyclic` runs its closure *before*
+            // the `Rc` exists, so `upgrade()` on the `Weak` returns `None` by
+            // construction. The old `.expect()` asserted the exact opposite
+            // and the line is visually identical to the correct one below it,
+            // so only a run in a real browser found it. Weak is also right on
+            // the merits — a callback should not keep alive the thing it is a
             // callback on.
             // `new_cyclic` lends the closure a `&Weak`, not a `Weak`.
             shared: weak.clone(),
@@ -485,8 +476,8 @@ fn sync_increment_fields(app: &App) {
     for field in &app.dom.increment_fields {
         let _ = field.set_attribute("data-inert", if zero { "true" } else { "false" });
     }
-    // The type only matters when there is an increment for it to type, so it
-    // goes with them.
+    // The type goes with them: it only matters when there is an increment to
+    // type.
     app.dom.increment_type.set_disabled(zero);
 }
 

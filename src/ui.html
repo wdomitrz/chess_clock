@@ -84,7 +84,6 @@
         padding: 1rem;
       }
 
-      /* --- setup --- */
       #setup {
         flex-direction: column;
         align-items: center;
@@ -128,7 +127,7 @@
         font-size: 1.125rem;
         font-family: inherit;
       }
-      /* :focus-visible, so the ring shows for a keyboard and not for a tap. */
+      /* :focus-visible, so the ring shows for a keyboard and not a tap. */
       .field input:focus-visible,
       .field select:focus-visible,
       button:focus-visible {
@@ -136,9 +135,8 @@
         outline-offset: 2px;
         border-color: var(--focus);
       }
-      /* The increment fields are the second row's right two, and the type
-         select the first; when there is no increment they dim rather than
-         disappear, because the row's layout is the user's mental model. */
+      /* When there is no increment the three fields dim rather than
+         disappear, so the row's layout stays the user's mental model. */
       .field[data-inert="true"] {
         opacity: 0.5;
       }
@@ -159,18 +157,15 @@
         background: var(--accent-down);
       }
 
-      /* --- game ---
-         Two full-height panels, each reading its own time turned 90° so it
-         lies along the phone's length for a player sitting at either edge.
+      /* Two full-height panels, each reading its own time turned 90° so it
+         lies along the phone's length for a player at either edge.
 
-         Both readings are turned the SAME way — 90°, which leaves the text
-         facing left, so you tilt your head left to read it. That is the
-         author's original: at `006f70c` both spans carried `.rotate-90`
-         (`rotate: 90deg`) and both buttons `.rotate-90`, and the two readings
-         were not opposed to each other. An earlier version of this rewrite
-         turned the lower one the other way on the theory that the clocks
-         should face outward from the device's centre. That theory was
-         invented here rather than inherited, it was wrong, and it is gone. */
+         Both readings are turned the SAME way, 90°, so the text faces left and
+         you tilt your head left to read it. That is the author's original: at
+         `006f70c` both spans and both buttons carried `.rotate-90`. Turning
+         the lower one the other way, so the clocks face outward from the
+         device's centre, was a theory invented here rather than inherited.
+         It was wrong, and it is gone. */
       #game {
         display: grid;
         grid-template-rows: 1fr 1fr;
@@ -187,33 +182,27 @@
         -webkit-touch-callout: none;
         transition: background-color 150ms linear;
       }
-      /* The 90° turn.
-         *
-         * ONE property, never two. The `rotate` property and the `transform`
-         * property are *different transform functions*, and a browser
-         * composes them: setting both to 90deg rotates by 180deg, and the
-         * reading renders upside down. Measured in Chromium, on a 200x40 box
-         * with a marker on its left edge:
+      /* ONE property, never two. `rotate` and `transform` are *different*
+         transform functions and a browser composes them, so setting both to
+         90deg turns the reading 180deg and renders it upside down. Measured
+         in Chromium, on a 200x40 box with a marker on its left edge:
          *
          *   transform:rotate(90deg)  -> marker at (80, -80)   90 deg, correct
          *   rotate:90deg              -> marker at (80, -80)   identical
          *   both                      -> marker at (180, 0)   180 deg, wrong
          *
-         * (Those markers are a horizontal 200x40 box, so this table is about
-         * the composition, not about the app's layout — the app's panels are
-         * tall and narrow, and the direction there is measured in the
+         * (Those markers describe the composition, not the app's layout: the
+         * panels are tall and narrow, and the direction there is set by the
          * `#panel-* .reading` rules below.)
          *
-         * The original set one (`rotate: 90deg`, in its Tailwind build) and
-         * this set two, "for a browser that only knows the old one" — which is
-         * not how it works. `transform: rotate()` is understood by every
-         * browser that has ever run this app, so the fallback bought nothing
-         * and cost the orientation.
+         * This once set both, "for a browser that only knows the old one",
+         * which is not how it works — `transform: rotate()` is understood by
+         * every browser that has ever run this app. The fallback bought
+         * nothing and cost the orientation.
          *
-         * `transform` is used rather than `rotate` so the rotation still
-         * applies in a browser without the independent `rotate`/`translate`
-         * properties (Safari before 14.1), which is a real gap and the reason
-         * to prefer the older spelling here.
+         * `transform` rather than `rotate` so the rotation still applies
+         * without the independent `rotate`/`translate` properties (Safari
+         * before 14.1).
          */
       .panel .reading {
         display: block;
@@ -229,9 +218,9 @@
         background: var(--panel-flag);
       }
 
-      /* The two buttons sit over the panels but must not swallow the taps
-         that switch turns, so the overlay is transparent to pointers and only
-         the buttons themselves take them. */
+      /* The buttons sit over the panels but must not swallow the taps that
+         switch turns, so the overlay is transparent to pointers and only the
+         buttons take them. */
       #controls {
         position: fixed;
         inset: 0;
@@ -243,9 +232,8 @@
         pointer-events: none;
       }
       #controls button {
-        /* One property, for the same reason as the readings: `rotate` and
-           `transform` compose, and setting both turns the label 180deg. Same
-           90° as the readings, as in the original. */
+        /* One property, as in `.panel .reading` above: setting both turns the
+           label 180deg. Same 90°, as in the original. */
         transform: rotate(90deg);
         pointer-events: auto;
         font-family: inherit;
@@ -271,9 +259,7 @@
         background: var(--stop-down);
       }
 
-      /* The panels are the clock, so nothing about them may move or flash:
-         the one animation in the app is a colour change, and a player
-         reading it should not have to wait for it. */
+      /* The panels are the clock, so nothing about them may move or flash. */
       @media (prefers-reduced-motion: reduce) {
         * {
           transition-duration: 0.01ms !important;

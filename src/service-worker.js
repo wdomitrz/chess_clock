@@ -25,10 +25,10 @@ self.addEventListener('activate', event => {
   })());
 });
 self.addEventListener('fetch', event => {
-  // Deliberately leave unrelated pages, API requests, files and blobs alone.
-  // The directory check is the second half of that rule: a request outside
-  // this app's own directory is never this worker's to answer, whatever the
-  // scope says.
+  // Unrelated pages, API requests, files and blobs are left alone. `IS_OWN`
+  // is the second half of that rule, checked per request: scope is a
+  // registration's claim, not a promise, and a wrong scope must not let this
+  // worker answer for pages it knows nothing about.
   const url = event.request.url;
   if (event.request.method !== 'GET' || !IS_OWN(url) || !ASSETS.includes(url)) return;
   event.respondWith((async () => {

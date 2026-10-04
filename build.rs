@@ -88,38 +88,23 @@ fn main() {
     // build that follows the wasm-bindgen pass is the one that publishes.
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.starts_with("wasm") {
-        // The Screen Wake Lock API in `web-sys` 0.3.105 is behind
-        // `web_sys_unstable_apis`, and the whole of it: `Navigator::wake_lock`,
-        // `WakeLock::request`, the `WakeLockSentinel` type and the
-        // `WakeLockType` enum each carry `#[cfg(web_sys_unstable_apis)]`.
-        // Enabling the *features* is necessary and not sufficient; without
-        // this cfg the wasm build fails with "cannot find
-        // `WakeLockSentinel` in crate `web_sys`" and names no feature to add.
+        // The Screen Wake Lock API is behind `web_sys_unstable_apis` in
+        // `web-sys` 0.3.105, and the whole of it: `Navigator::wake_lock`,
+        // `WakeLock::request`, `WakeLockSentinel` and `WakeLockType` each carry
+        // the cfg. Enabling the features is necessary and not sufficient.
         //
-        // The cfg that actually matters is NOT emitted here. It comes from
-        // `.cargo/config.toml`, and the reason is worth writing down because
-        // the two lines below make this look like the right answer:
-        // `cargo:rustc-cfg` applies only to the *building package's own
-        // units*. `web_sys` is a registry dependency, compiled in its own
-        // unit, so the cfg set here never reaches it — the items the crate
-        // needs are not compiled at all. A `compile_error!` probe inside this
-        // crate confirms the cfg IS set on this crate itself, which is exactly
-        // why the technique looks like it works until the real error appears.
+        // The cfg that actually matters is NOT emitted here. `cargo:rustc-cfg`
+        // reaches only the *building package's own units*, and `web_sys` is a
+        // registry dependency compiled in its own unit, so the items the crate
+        // needs are never compiled at all — which looks like the technique
+        // works right up until the real error names no feature to add. The
+        // load-bearing setting is `.cargo/config.toml`, with `RUSTFLAGS` in the
+        // CI workflow as the second source. Do not remove these two lines
+        // expecting the build to break, and do not rely on them expecting it to
+        // succeed.
         //
-        // So the two lines below are a convenience for this crate's own source
-        // (which does gate on the cfg) and are *not* what makes the wasm build
-        // succeed. Do not remove them expecting the build to break, and do not
-        // rely on them expecting it to succeed either: the load-bearing
-        // setting is `.cargo/config.toml`, with `RUSTFLAGS` in the CI workflow
-        // as the second source.
-        //
-        // The alternative would have been binding the one method by hand,
-        // which is the shared spec's stated prohibition on a manual ABI, so it
-        // is not taken.
-        //
-        // The cfg is applied to the wasm build only, so the host build — and
-        // therefore the `cargo test` that runs here — compiles the same code
-        // without it and cannot be affected by an unstable-API flag it has no
+        // Scoped to the wasm build, so the host build — and the `cargo test`
+        // that runs under it — is unaffected by an unstable-API flag it has no
         // use for.
         println!("cargo:rustc-check-cfg=cfg(web_sys_unstable_apis)");
         println!("cargo:rustc-cfg=web_sys_unstable_apis");

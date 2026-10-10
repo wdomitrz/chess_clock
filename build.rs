@@ -50,9 +50,16 @@ const ICON_SIZES: [u32; 2] = [192, 512];
 /// `#111827`, and `background_color` is the darker `#0b1220` the splash uses.
 /// A two-hash raw string, because the manifest is full of `#rrggbb` colours
 /// and a one-hash raw string would end at the first one it met.
+///
+/// The manifest declares no `id`. Chrome resolves a relative id against
+/// `start_url`'s *origin*, not the manifest's directory, so the `"./"` this
+/// constant once carried gave every app in the family the same install
+/// identity — and Android treats a manifest whose id matches an installed app
+/// as an update of that app, swallowing the second install. Left out,
+/// identity falls back to `start_url`, which resolves against the manifest
+/// URL and is unique per app.
 const MANIFEST: &str = r##"{
-  "id": "./",
-  "name": "Chess Clock",
+    "name": "Chess Clock",
   "short_name": "Chess",
   "start_url": "./",
   "scope": "./",

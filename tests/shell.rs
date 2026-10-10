@@ -708,9 +708,20 @@ fn the_committed_manifest_is_well_formed_and_relative() {
     assert_eq!(manifest["name"], "Chess Clock");
     assert_eq!(manifest["short_name"], "Chess");
     assert_eq!(manifest["display"], "standalone");
-    for key in ["id", "start_url", "scope"] {
+    for key in ["start_url", "scope"] {
         assert_eq!(manifest[key], "./", "{key} must be relative");
     }
+    // The manifest must declare no `id`. Chrome resolves a relative id
+    // against start_url's ORIGIN, not the manifest's directory, so the
+    // literal `"./"` this repo once shipped gave every app in the family the
+    // same install identity: Android treats a manifest whose id matches an
+    // installed app as an update of that app, and the second install is
+    // swallowed. Left out, identity falls back to `start_url` -- this app's
+    // own mount point, unique per app.
+    assert!(
+        manifest.get("id").is_none(),
+        "the manifest must not declare an id: \"./\" resolves to the bare origin and collides with every sibling app"
+    );
     for key in ["theme_color", "background_color"] {
         let value = manifest[key]
             .as_str()
@@ -720,7 +731,6 @@ fn the_committed_manifest_is_well_formed_and_relative() {
             "{key} must be a #rrggbb colour, got {value:?}"
         );
     }
-    // Both install icons, declared at the sizes they are rasterized at.
     let icons = manifest["icons"].as_array().expect("an icon list");
     assert_eq!(icons.len(), 2, "one icon per install size");
     for (icon, size) in icons.iter().zip(["192x192", "512x512"]) {
@@ -757,7 +767,6 @@ fn the_icon_is_the_original_svg_untouched() {
         "assets/icon.svg must stay the author's original, byte for byte"
     );
 
-    // It is an SVG, it is the Material Symbols pawn, and it is transparent.
     let text = String::from_utf8(icon).expect("the icon is text");
     assert!(text.contains("<svg"), "the icon must remain an SVG");
     assert!(
@@ -824,6 +833,66 @@ fn no_build_artifact_is_committed() {
             !tracked.lines().any(|line| line == gone),
             "{gone} is tracked; it was the original JavaScript app, now replaced by Rust"
         );
+    }
+}
+
+/// The wake-lock cfg must travel with the repository, and the documentation
+/// must not claim otherwise.
+///
+/// `web_sys_unstable_apis` is behind a cfg, and `cargo:rustc-cfg` in `build.rs`
+/// does **not** supply it: that applies only to the building package's own
+/// units, and `web-sys` is a registry dependency compiled in its own unit, so
+/// the cfg never reaches it. The build then fails with five errors naming
+/// `WakeLockSentinel`, `WakeLockType` and `wake_lock`.
+///
+/// So `.cargo/config.toml` has to be committed, and the docs have to say it is
+/// what works. Asserting only the file's presence would let the prose drift
+/// back into claiming `build.rs` is sufficient — which is exactly what it did,
+/// and exactly what makes a fresh clone fail with the documented commands.
+#[test]
+fn the_wake_lock_cfg_travels_with_the_repository() {
+    let config = std::fs::read_to_string(root().join(".cargo/config.toml"))
+        .unwrap_or_else(|error| panic!("reading .cargo/config.toml: {error}"));
+    assert!(
+        config.contains("--cfg=web_sys_unstable_apis"),
+        ".cargo/config.toml must carry --cfg=web_sys_unstable_apis; without it a fresh clone \
+         cannot build the wasm target at all, because build.rs's cargo:rustc-cfg never reaches \
+         the web-sys dependency",
+    );
+    // Scoped to the wasm target: the host build compiles no web-sys code, and
+    // inheriting an unstable-API flag it has no use for is noise at best.
+    assert!(
+        config.contains("wasm32-unknown-unknown"),
+        ".cargo/config.toml must scope the flag to [target.wasm32-unknown-unknown]",
+    );
+
+    // And no document may claim `build.rs` is what makes the build work. The
+    // failure mode this guards is a reader trusting the prose and deleting the
+    // config file as redundant, which is not recoverable without CI.
+    for (name, text) in [
+        (
+            "README.md",
+            std::fs::read_to_string(root().join("README.md")),
+        ),
+        (
+            "AGENTS.md",
+            std::fs::read_to_string(root().join("AGENTS.md")),
+        ),
+    ] {
+        let text = text.unwrap_or_else(|error| panic!("reading {name}: {error}"));
+        let stripped = strip_comments(&text);
+        for lie in [
+            "`build.rs` sets the cfg for the wasm target",
+            "the only mechanism that actually reaches the crate",
+            "is guaranteed to reach the crate being",
+        ] {
+            assert!(
+                !stripped.contains(lie),
+                "{name} still claims that `build.rs` supplies the wake-lock cfg (\"{lie}\"). That \
+                 is false: cargo:rustc-cfg reaches only the building package's own units, and \
+                 web-sys is compiled in its own unit. See .cargo/config.toml.",
+            );
+        }
     }
 }
 
@@ -1354,17 +1423,19 @@ fn strip_yaml_comments(source: &str) -> String {
         .join("\n")
 }
 
-/// A deploy that can run from any branch is a deploy a stranger can run.
+/// A deploy that can run from any branch is a deploy a stranger can run, and
+/// one that can run from any *repository* is a deploy that publishes the fork.
 ///
 /// `pages: write` and `id-token: write` are the two permissions that make a
 /// GitHub Actions job able to overwrite the live site, and the token behind
 /// them is minted for the repository however the workflow was reached. The
 /// project *wants* an automatic deploy on every merge to master -- that is the
 /// point, and it is why nobody has to remember to publish. What it does not
-/// want is that same power on every other ref, so the invariant asserted here
-/// is the narrow one that survives the convenience: master is the only ref
-/// that can reach the live site, and the publishing permissions live in the
-/// one job that is gated on it.
+/// want is that same power on every other ref, or in the fork, so the
+/// invariant asserted here is the narrow one that survives the convenience:
+/// master of the upstream repository is the only thing that can reach the live
+/// site, and the publishing permissions live in the one job that is gated on
+/// it.
 #[test]
 fn only_master_can_reach_the_live_site() {
     let Some(pages) = workflow("pages.yml") else {
@@ -1398,6 +1469,54 @@ fn only_master_can_reach_the_live_site() {
     assert!(
         deploy_job.contains("if:") && deploy_job.contains("github.ref == 'refs/heads/master'"),
         "the `deploy` job must be gated on the build being for master",
+    );
+
+    // ... and it must ALSO be gated on not being a fork. This file is
+    // byte-identical in `wdomitrz/chess_clock` and in its fork
+    // `bot-git-ai/chess_clock`, so a gate that tests only the branch name
+    // cannot tell the two repositories apart: both have a `master`, and a
+    // push to the fork's master would try to publish. Two things then go
+    // wrong, and the first is the one that happens. A fork has no Pages site
+    // of its own until someone enables one by hand, so every push to fork
+    // master dies with "Creating Pages deployment failed ... Ensure GitHub
+    // Pages has been enabled" -- three consecutive red runs on 2026-10-02
+    // before this gate existed. And if Pages were enabled there, the fork
+    // would serve its own copy, which drifts from the published site as soon
+    // as the two masters diverge -- which they have already.
+    //
+    // `github.event.repository.fork` is the discriminator because it needs no
+    // configuration: it is supplied by the event, false upstream and true in
+    // the fork. The obvious alternative, a repository Actions variable, has
+    // the failure mode this assertion exists to prevent -- it would have to be
+    // set on the *upstream* repository to publish, and no account but the
+    // user's can do that, so the gate would ship as silently off on the one
+    // repository where it matters.
+    // Read the gate out of the workflow with its comments stripped, or the
+    // comment block above the `if:` -- which names both halves of the gate
+    // while explaining it -- would satisfy this assertion on its own. That is
+    // not hypothetical: it is the mistake the `RUSTFLAGS` assertion in this
+    // same file was shipped with, and it shipped.
+    let live = strip_yaml_comments(&pages);
+    let live_gate = live
+        .split("\n  deploy:")
+        .nth(1)
+        .and_then(|job| job.split_once("if:").map(|(_, after)| after))
+        .expect("the `deploy` job must have an `if:` gate");
+    assert!(
+        live_gate.contains("!github.event.repository.fork"),
+        "the `deploy` job must be gated on `!github.event.repository.fork`; this workflow is \
+         byte-identical in the fork `bot-git-ai/chess_clock`, so a branch-name-only gate \
+         publishes from the fork too -- failing with 'Ensure GitHub Pages has been enabled' \
+         until Pages is enabled there, and serving a divergent copy afterwards",
+    );
+    // The two halves are one condition, not two jobs: an `if:` per job would
+    // be an AND across two independent gates, and a `build`-job gate would
+    // silently stop the *build* from running on the fork rather than just its
+    // publish, which is the opposite of what this is for.
+    assert!(
+        live_gate.contains("github.ref == 'refs/heads/master'"),
+        "the fork rule must extend the master gate, not replace it: `deploy` must be one \
+         `if:` testing both `github.ref` and `github.event.repository.fork`",
     );
 
     // And the permissions that can actually publish must be scoped to that job

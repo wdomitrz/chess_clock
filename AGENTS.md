@@ -175,7 +175,8 @@ the original shipped, whose page was Tailwind `gray-900`:
 | `display` | `standalone` | the original's, unchanged |
 | `theme_color` | `#111827` | the page background, so the browser UI does not flash a different colour |
 | `background_color` | `#0b1220` | a slightly darker slate for the install splash, behind the app before it paints |
-| `id` / `start_url` / `scope` | `"./"` | so the site mounts anywhere |
+| `start_url` / `scope` | `"./"` | so the site mounts anywhere |
+| `id` | *(absent)* | see below: an id of `"./"` would collide with every sibling app |
 
 The theme colour is the oklch `gray-900` of the original stylesheet
 (`oklch(21% 0.034 264.665)`) as hex, and every other colour in `ui.html` is the
@@ -434,8 +435,8 @@ loads the generated bindings and **calls** their initializer, that there is
 exactly one script tag, that every URL is relative, that the worker's
 `__VERSION__` placeholder appears exactly once and `skipWaiting` does not, that
 the manifest constant in `build.rs` is valid JSON with relative
-`id`/`start_url`/`scope`, that the icon is the upstream file byte for byte, and
-that no generated file, no raster icon and none of the original
+`start_url`/`scope` and no `id`, that the icon is the upstream file byte for
+byte, and that no generated file, no raster icon and none of the original
 `app.js`/`sw.js`/`tw.css` are tracked.
 
 Three of these deserve their reason written down:

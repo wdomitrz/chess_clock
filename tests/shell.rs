@@ -708,9 +708,20 @@ fn the_committed_manifest_is_well_formed_and_relative() {
     assert_eq!(manifest["name"], "Chess Clock");
     assert_eq!(manifest["short_name"], "Chess");
     assert_eq!(manifest["display"], "standalone");
-    for key in ["id", "start_url", "scope"] {
+    for key in ["start_url", "scope"] {
         assert_eq!(manifest[key], "./", "{key} must be relative");
     }
+    // The manifest must declare no `id`. Chrome resolves a relative id
+    // against start_url's ORIGIN, not the manifest's directory, so the
+    // literal `"./"` this repo once shipped gave every app in the family the
+    // same install identity: Android treats a manifest whose id matches an
+    // installed app as an update of that app, and the second install is
+    // swallowed. Left out, identity falls back to `start_url` -- this app's
+    // own mount point, unique per app.
+    assert!(
+        manifest.get("id").is_none(),
+        "the manifest must not declare an id: \"./\" resolves to the bare origin and collides with every sibling app"
+    );
     for key in ["theme_color", "background_color"] {
         let value = manifest[key]
             .as_str()

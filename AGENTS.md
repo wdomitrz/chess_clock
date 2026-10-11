@@ -409,7 +409,11 @@ failure than an opaque `unreachable`, and it is a failure someone can act on.
   it.
 - `service-worker.js`: caches only a fixed app-shell allowlist, scope-specific
   content-versioned cache, atomic install, no `skipWaiting`, so an update
-  cannot swap the wasm under a live game.
+  cannot swap the wasm under a live game. The page owns the handover: it
+  registers the worker at mount, asks (`ui.rs`'s `nudge_worker_update`), and
+  the worker's `skipWaiting` answers only the page's `SKIP_WAITING` message,
+  with the page reloading on `controllerchange` — an installed copy updates on
+  its next open, and no page is ever swapped under without having asked.
 - `build.rs`: writes the six files it owns into `dist/`, rasterizes the install
   icons from `assets/icon.svg`, assembles the manifest, derives the worker's
   content-derived cache version, and sets the wake-lock cfg for the wasm

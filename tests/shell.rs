@@ -53,8 +53,7 @@ fn tracked_files() -> Option<String> {
         .args(["rev-parse", "--git-dir"])
         .current_dir(root())
         .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|out| out.status.success());
     if !inside {
         return None;
     }
@@ -416,13 +415,29 @@ fn the_service_worker_template_has_exactly_one_placeholder() {
         worker.contains("new URL('./', self.location.href)"),
         "the worker must resolve its cache from its own location"
     );
-    // No `skipWaiting`: swapping the wasm under a live game would replace the
-    // clock mid-move. The *call* is what is forbidden — the file's own header
-    // comment names the API to explain why it is absent, so matching the bare
-    // word would fail on the explanation.
+    // An unprompted `skipWaiting` would swap the clock mid-move. The one
+    // allowed call is behind the page's `SKIP_WAITING` message: the ask comes
+    // from the page that immediately reloads as the worker takes over, so no
+    // client ever straddles the two versions. Asserted structurally — the
+    // call must sit inside the message handler, gated on the message — so an
+    // unconditional call cannot creep back in.
+    let handler = worker
+        .split("addEventListener('message'")
+        .nth(1)
+        .expect("the worker must listen for the page's handover message");
+    let handler = &handler[..handler.find("});").expect("the message handler closes")];
     assert!(
-        !worker.contains("self.skipWaiting"),
-        "an update must not swap the app under a live tab"
+        handler.contains("event.data === 'SKIP_WAITING'") && handler.contains("skipWaiting()"),
+        "skipWaiting must be the worker's answer to the page's ask, never a call \
+         it makes on its own"
+    );
+    let outside = worker
+        .split("addEventListener('message'")
+        .next()
+        .expect("prefix");
+    assert!(
+        !outside.contains("self.skipWaiting"),
+        "no skipWaiting outside the message handler"
     );
     // The cache covers the eight files the two build steps produce, and the
     // assertion that they are all *published* is the separate test below.
@@ -497,6 +512,42 @@ fn the_page_states_the_scope_and_releases_a_wider_one() {
         ui.contains("get_registrations") && ui.contains("unregister"),
         "a stale wider registration survives a reload, a version bump and a \
          reinstall; only an explicit unregister clears it"
+    );
+}
+
+/// The page registers the worker itself, at mount, and takes a newly
+/// installed worker over with a reload.
+///
+/// Two real bugs are pinned here. The registration was once hung on
+/// `DOMContentLoaded` from inside `mount`, an event that had already fired by
+/// the time `mount` runs — found by loading the deployed site in a clean
+/// browser and finding no service worker at all: the app silently stopped
+/// being installable. And without the page's ask, an installed copy waits
+/// forever for an update: on a phone, possibly never.
+#[test]
+fn the_page_registers_the_worker_and_takes_updates_over() {
+    let ui =
+        strip_rust_comments(&std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs"));
+    assert!(
+        ui.contains("register_service_worker();"),
+        "the registration must be a plain call at mount time; an event listener \
+         keyed on `DOMContentLoaded` from `mount` can never fire -- the document \
+         is ready before `mount` runs -- and the app silently stops being \
+         installable"
+    );
+    assert!(
+        ui.contains("registration.waiting()") && ui.contains(".installing()"),
+        "the page must look at both workers an update can leave behind: one already \
+         installed and waiting, and one discovered while the page stands"
+    );
+    assert!(
+        ui.contains("post_message(&JsValue::from_str(\"SKIP_WAITING\"))"),
+        "the handover starts with the page's message; the worker never swaps \
+         itself in unasked"
+    );
+    assert!(
+        ui.contains("controllerchange") && ui.contains("location().reload()"),
+        "and ends with the page reloading exactly as the worker takes over"
     );
 }
 
@@ -644,7 +695,7 @@ fn worker_assets(worker: &str) -> Vec<String> {
         .expect("the worker must declare ASSETS");
     let body_start = start + "const ASSETS = [".len();
     let end = worker[body_start..]
-        .find("]")
+        .find(']')
         .expect("the ASSETS list must be terminated");
     worker[body_start..body_start + end]
         .split(',')
@@ -783,11 +834,10 @@ fn the_committed_manifest_is_well_formed_and_relative() {
 /// cheapest possible record.
 #[test]
 fn the_icon_is_the_original_svg_untouched() {
-    let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
-
     // sha256 of the author's Material Symbols pawn, #434343, 48px, transparent.
     const ORIGINAL_SHA256: &str =
         "9cdd9adaca7a8a60af11a0d25cb2ccc9d5b4784ff864217ba0dec31f09afc306";
+    let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
     assert_eq!(
         hex(&sha256::digest(&icon)),
         ORIGINAL_SHA256,
@@ -813,7 +863,7 @@ fn no_raster_icon_is_committed() {
     if let Some(tracked) = tracked_files() {
         for line in tracked.lines() {
             assert!(
-                !line.ends_with(".png"),
+                !line.to_ascii_lowercase().ends_with(".png"),
                 "{line} is a raster icon; icons are rasterized from assets/icon.svg at build time"
             );
         }
@@ -1115,13 +1165,12 @@ fn the_readings_turn_outward_and_never_by_both_properties_at_once() {
 
     // Exactly three rotations: the top reading, the bottom reading, the
     // buttons. One per element, and the two panels must differ.
-    let rotations: Vec<&str> = code
+    let rotations: Vec<String> = code
         .match_indices("transform: rotate(")
         .map(|(at, _)| {
             code[at..]
                 .find("deg)")
-                .map(|end| &code[at..at + end + 4])
-                .unwrap_or("")
+                .map_or(String::new(), |end| code[at..at + end + 4].to_string())
         })
         .collect();
     assert_eq!(
@@ -1621,23 +1670,83 @@ mod sha256 {
     //! A minimal SHA-256, for the one digest in the suite.
 
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-        0xc67178f2,
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
     ];
 
     /// Hash `data`.
     pub fn digest(data: &[u8]) -> [u8; 32] {
         let mut h: [u32; 8] = [
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-            0x5be0cd19,
+            0x6a09_e667,
+            0xbb67_ae85,
+            0x3c6e_f372,
+            0xa54f_f53a,
+            0x510e_527f,
+            0x9b05_688c,
+            0x1f83_d9ab,
+            0x5be0_cd19,
         ];
 
         let mut message = data.to_vec();

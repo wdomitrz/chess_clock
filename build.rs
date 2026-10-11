@@ -202,6 +202,12 @@ fn rasterize_icons(root: &Path) -> Vec<(u32, Vec<u8>)> {
             // The SVG is square, so one scale for both axes is exact; a
             // non-square source would need the height factored in too, and
             // the assert above is where that would go.
+            // `size` is one of `ICON_SIZES` and `width` the SVG's own width,
+            // both far below the 24-bit mantissa; the cast is exact, and the
+            // lint's worry (a big `u32` losing precision) cannot apply to a
+            // pair of values this small. Written as a widening-then-narrowing
+            // dance would be no more correct, so the intent is stated here.
+            #[allow(clippy::cast_precision_loss)]
             let scale = size as f32 / width;
             resvg::render(
                 &tree,

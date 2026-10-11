@@ -184,6 +184,14 @@ oklch equivalent of the same Tailwind v4 palette, converted once and written as
 a custom property. The look is the author's; only the 13 KiB of vendored
 Tailwind is gone.
 
+For the same reason the worker **never serves the manifest from its cache**.
+The manifest decides what an install *is*; a cached copy would let a fresh
+install read a manifest older than the last change to it and re-derive a stale
+identity — and the origin's Cache Storage survives an uninstall/reinstall, so
+the stale copy would outlive the app it came from. The manifest stays in the
+worker's precache list so a broken one still fails the install loudly, but its
+fetch handler passes it to the network unconditionally.
+
 ## The app
 
 **Setup.** Hours, minutes and seconds (10:00:00 by default) and an increment

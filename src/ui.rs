@@ -121,15 +121,13 @@ struct Dom {
 /// is monotonic, so a system clock change mid-game cannot move a chess clock.
 /// The value is only ever *differenced* against an anchor, so neither its
 /// sub-millisecond precision nor its float representation ever reaches the
-/// display.
+/// display. Total rather than best-effort — a tick has to have a clock to
+/// read, and `performance` is on every `Window` there is — so the fallback
+/// clock exists for the type, not for the world.
 fn now() -> f64 {
     web_sys::window()
         .and_then(|window| window.performance())
-        .map(|performance| performance.now())
-        // `performance` is on every `Window` there is. This is a total
-        // function rather than a best-effort one, because a tick has to have
-        // a clock to read.
-        .unwrap_or_else(js_sys::Date::now)
+        .map_or_else(js_sys::Date::now, |performance| performance.now())
 }
 
 /// The window. A wasm page always has one, so the unwrap is a panic rather
@@ -396,13 +394,16 @@ pub fn mount() {
     // bindings, the one loader line and the worker itself. Neither the
     // registration nor its outcome is awaited: an offline-capable install is a
     // bonus, and failing to register one must not stop the clock.
-    {
-        let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
-            register_service_worker();
-        });
-        let _ = listen(&document, "DOMContentLoaded", &handler, "offline");
-        handler.forget();
-    }
+    //
+    // Registered here, directly. It was once hung on `DOMContentLoaded` from
+    // inside `mount`, and that listener can never fire: `mount` is called from
+    // `start_when_ready` exactly when the document is *already* past
+    // `loading`, so the event went by before the listener existed. Found by
+    // loading the deployed site in a clean browser and finding no service
+    // worker at all — the app silently stopped being installable, with every
+    // automated check green, which is why the registration is now pinned by a
+    // test on the call, not by an assertion on the idea of one.
+    register_service_worker();
 
     // The first paint: the setup screen, both readings at their starting time,
     // and the increment fields' state. Nothing is scheduled until a clock is
@@ -615,6 +616,9 @@ fn tick(app: &Shared) {
     // Measured from the anchor, never accumulated: a frame that arrives late
     // does not cost the player a tenth of a second.
     let (anchor_remaining, anchor_at) = state.anchor;
+    // The floor is the truncation: elapsed is non-negative by the `max`, and
+    // a sub-millisecond remainder folding away is exactly what Millis means.
+    #[allow(clippy::cast_possible_truncation)]
     let elapsed = (now() - anchor_at).max(0.0) as Millis;
     let flagged = state.game.tick(elapsed, anchor_remaining);
     state.anchor = (state.game.remaining[player.index()], now());
@@ -733,7 +737,159 @@ fn register_service_worker() {
     // registration settles, and this app's own registration is left alone by
     // the scope test either way. Waiting for the promise to settle first
     // would only delay the repair by a tick for no correctness gained.
+    //
+    // So does the update nudge, for the same reason. The registration promise
+    // resolves to the registration itself, which is the handle the nudge
+    // watches.
+    let watch = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+        if let Ok(registered) = value.dyn_into::<web_sys::ServiceWorkerRegistration>() {
+            // The registration moves into the task: the closure's own binding
+            // dies with the closure's invocation, and the nudge may outlive
+            // it — it watches for workers that arrive while the page stands.
+            spawn_local(async move {
+                nudge_worker_update(&registered).await;
+            });
+        }
+    });
+    let _ = promise.then2(&watch, &watch);
+    watch.forget();
     spawn_local(release_stale_registrations(window));
+}
+
+/// Ask this app's service worker to update as soon as it can take over.
+///
+/// The worker never swaps itself in unasked: an update waits for every page
+/// it controls to close, because a clock mid-game must not run half old code
+/// under half new. Left exactly there, an installed copy would update only
+/// when every opening of it has closed — on a phone, possibly never. So this
+/// asks, and the ask is safe by construction: the sender is the page itself,
+/// which then reloads as the swap happens. The worker answers the message
+/// with `skipWaiting`, the browser fires `controllerchange`, the page reloads
+/// exactly once, and the old worker is redundant. No client ever straddles
+/// the two versions — the one that asked is the one that stepped aside.
+///
+/// The message is sent for a worker already installed and waiting, and for
+/// one still installing — sent on `installed` in the second case, after a
+/// `statechange` wait — and a `controllerchange` arriving with no reload of
+/// ours in flight is answered by one reload, so a version swap is never
+/// better than one reload away, whatever path it came in on.
+///
+/// Best effort like everything around it: a failure is a console line, and a
+/// clock that stays on this version still keeps time.
+async fn nudge_worker_update(registration: &web_sys::ServiceWorkerRegistration) {
+    let window = window();
+
+    // The reload that follows a swap. The flag keeps it one-per-swap, so a
+    // late `updatefound` from the same registration cannot reload again
+    // underneath it.
+    watch_for_controller_change(&window);
+
+    // A worker installed and waiting for pages like this one to close. This
+    // is the state an update is left in when a visit ended before its
+    // handover: nothing new will arrive until the served bytes change again,
+    // so this is the one chance to ask it in.
+    if let Some(worker) = registration.waiting() {
+        if worker.state() == web_sys::ServiceWorkerState::Installed {
+            ask_worker_in(&worker);
+            return;
+        }
+    }
+
+    // A worker installing right now — this visit's own update check found
+    // one — or one that arrives later while the page stands.
+    let installing = match registration.installing() {
+        Some(worker) => Some(worker),
+        None => update_found(registration).await,
+    };
+    let Some(worker) = installing else {
+        return;
+    };
+    if wait_for_state_change(&worker).await.is_err() {
+        let note = JsValue::from_str("chess_clock: could not wait for the worker to install.");
+        web_sys::console::warn_1(&note);
+        return;
+    }
+    if worker.state() == web_sys::ServiceWorkerState::Installed {
+        ask_worker_in(&worker);
+    }
+}
+
+/// Send the message the worker answers with `skipWaiting`.
+fn ask_worker_in(worker: &web_sys::ServiceWorker) {
+    worker.post_message(&JsValue::from_str("SKIP_WAITING")).ok();
+}
+
+/// Reload once when the worker in charge changes.
+///
+/// The guard is the in-flight flag: an ask sent twice would fire the event
+/// once, and a second registration's late update could fire it again under a
+/// page already reloading. One reload per swap, and never two in a row, is
+/// what keeps this from becoming the loop the first version of this code
+/// was: a page that reloads unasked on `installed` never lets the waiting
+/// worker activate, because a reloading page still counts as a client.
+fn watch_for_controller_change(w: &web_sys::Window) {
+    thread_local! {
+        static WATCHING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if WATCHING.with(std::cell::Cell::get) {
+        return;
+    }
+    WATCHING.with(|watching| watching.set(true));
+
+    let container = w.navigator().service_worker();
+    let handler = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
+        window().location().reload().ok();
+    });
+    let _ = container
+        .add_event_listener_with_callback("controllerchange", handler.as_ref().unchecked_ref());
+    // Never dropped: exactly one listener for the page's lifetime, and the
+    // guard above makes re-registering a no-op.
+    handler.forget();
+}
+
+/// The worker this registration announces through `updatefound`, if one
+/// arrives while the page stands.
+///
+/// The event carries the registration, not the worker; the worker is its
+/// `installing` one. `None` resolves the wait empty if the registration is
+/// ever torn down between the two states this cares about.
+async fn update_found(
+    registration: &web_sys::ServiceWorkerRegistration,
+) -> Option<web_sys::ServiceWorker> {
+    let event = JsFuture::from(js_sys::Promise::new(&mut |resolve, _reject| {
+        let resolved = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+            resolve.call1(&JsValue::NULL, &value).ok();
+        });
+        let _ = registration
+            .add_event_listener_with_callback("updatefound", resolved.as_ref().unchecked_ref());
+        // Never dropped: the promise settles at most once, and the
+        // registration outlives the page anyway.
+        resolved.forget();
+    }))
+    .await
+    .ok()?;
+    let event = event.dyn_into::<web_sys::Event>().ok()?;
+    let announced = event
+        .target()?
+        .dyn_into::<web_sys::ServiceWorkerRegistration>()
+        .ok()?;
+    announced.installing()
+}
+
+/// Resolve at the worker's next state change, whichever it is.
+async fn wait_for_state_change(worker: &web_sys::ServiceWorker) -> Result<(), JsValue> {
+    JsFuture::from(js_sys::Promise::new(&mut |resolve, _reject| {
+        let resolved = Closure::<dyn FnMut(JsValue)>::new(move |value: JsValue| {
+            resolve.call1(&JsValue::NULL, &value).ok();
+        });
+        let _ = worker
+            .add_event_listener_with_callback("statechange", resolved.as_ref().unchecked_ref());
+        // Never dropped, like the one above: at most one state change is
+        // waited for here, and the worker outlives the page.
+        resolved.forget();
+    }))
+    .await
+    .map(|_| ())
 }
 
 /// Hand this app's own URLs back to the current worker.

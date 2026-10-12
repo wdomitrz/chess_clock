@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! The browser half: read the form, drive the clock, paint the two panels.
 //!
 //! Everything here is presentation and plumbing. No rule about how a clock

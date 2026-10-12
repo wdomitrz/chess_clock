@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! Chess Clock: a two-player clock with Fischer or Bronstein increment, in
 //! Rust.
 //!

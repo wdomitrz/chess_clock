@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! Write the static app shell to `dist/` while the crate compiles.
 //!
 //! Chess Clock is a browser application, so publishing it is a file copy, not
@@ -195,6 +192,10 @@ fn rasterize_icons(root: &Path) -> Vec<(u32, Vec<u8>)> {
             // The SVG is square, so one scale for both axes is exact; a
             // non-square source would need the height factored in too, and
             // the assert above is where that would go.
+            //
+            // The sizes are the fixed `ICON_SIZES` (192, 512), far below
+            // f32's 24-bit exact-integer range, so the conversion is exact.
+            #[allow(clippy::cast_precision_loss)]
             let scale = size as f32 / width;
             resvg::render(
                 &tree,

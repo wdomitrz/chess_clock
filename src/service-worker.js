@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
 // Browser lifecycle/cache plumbing only; all clock and app logic remains Rust.
 // No skipWaiting: an update takes over after old app tabs close, avoiding
 // mixed-version wasm/bindings during an in-progress game.

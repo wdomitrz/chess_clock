@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! The clock itself: time formatting, the increment rules, and the turn /
 //! pause state machine.
 //!
@@ -45,6 +42,7 @@ impl Increment {
     pub const CHOICES: [Increment; 2] = [Increment::Fischer, Increment::Bronstein];
 
     /// The label shown in the setup screen.
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Fischer => "Fischer",
@@ -62,6 +60,7 @@ impl Increment {
 ///
 /// Returns the mover's new remaining time. A zero increment is a no-op in both
 /// modes, and is not special-cased: the arithmetic already says so.
+#[must_use]
 pub fn increment_for_move(
     kind: Increment,
     increment: Millis,
@@ -95,6 +94,7 @@ pub fn increment_for_move(
 /// second — the 59 800–59 999 ms band — truncates to `59.9`, which is the
 /// last display before `1:00.0`… which the next branch takes over. That is the
 /// original's behaviour and the boundary is exercised by a test below.
+#[must_use]
 pub fn format_time(ms: Millis) -> String {
     let ms = ms.max(0);
     // One decimal of a second, truncated. `59_999` must read `59.9`, not
@@ -108,9 +108,9 @@ pub fn format_time(ms: Millis) -> String {
     if minutes >= 60 {
         format!("{}:{:02}:{:02}", minutes / 60, minutes % 60, secs)
     } else if minutes > 0 {
-        format!("{}:{:02}", minutes, secs)
+        format!("{minutes}:{secs:02}")
     } else {
-        format!("{:02}.{}", secs, decimal)
+        format!("{secs:02}.{decimal}")
     }
 }
 
@@ -146,6 +146,7 @@ impl Settings {
     /// maxima from the HTML form are applied here as well, because the
     /// numbers are clamped identically in both places and the clamp belongs to
     /// the rule, not to the markup.
+    #[must_use]
     pub fn from_parts(
         hours: i64,
         minutes: i64,
@@ -199,11 +200,13 @@ pub enum Phase {
 
 impl Phase {
     /// Whether the game is over, which is the one state nothing resumes from.
+    #[must_use]
     pub fn is_over(self) -> bool {
         matches!(self, Self::Finished)
     }
 
     /// Whether a tap on a panel should do anything at all.
+    #[must_use]
     pub fn accepts_taps(self) -> bool {
         matches!(self, Self::Armed | Self::Running)
     }
@@ -229,6 +232,7 @@ pub enum Tap {
 
 impl Tap {
     /// Whether this tap ended a move, and so owes an increment.
+    #[must_use]
     pub fn is_move(self) -> bool {
         matches!(self, Self::Moved)
     }
@@ -243,6 +247,7 @@ pub enum Player {
 
 impl Player {
     /// The other side. There are only two, so this is a flip.
+    #[must_use]
     pub fn other(self) -> Self {
         match self {
             Self::First => Self::Second,
@@ -251,6 +256,7 @@ impl Player {
     }
 
     /// The index into the pair of panels, in DOM order.
+    #[must_use]
     pub fn index(self) -> usize {
         match self {
             Self::First => 0,
@@ -301,6 +307,7 @@ impl Default for Game {
 impl Game {
     /// A game ready to be armed: both players on `settings.initial`, nobody
     /// on the clock.
+    #[must_use]
     pub fn new(settings: Settings) -> Self {
         Self {
             settings,
@@ -414,6 +421,7 @@ impl Game {
 
     /// The button's label, which the original set as text at the moment of
     /// the transition rather than deriving it.
+    #[must_use]
     pub fn pause_label(&self) -> &'static str {
         match self.phase {
             Phase::Paused => "Resume",
@@ -476,6 +484,7 @@ impl Game {
     /// The player who flagged is the one left on the clock: a clock only
     /// reaches zero on the turn that is running, so `on_clock` and a zero
     /// reading are the same fact.
+    #[must_use]
     pub fn loser(&self) -> Option<Player> {
         if !self.phase.is_over() {
             return None;
@@ -485,6 +494,7 @@ impl Game {
     }
 
     /// Both readings, in panel order, as the display shows them.
+    #[must_use]
     pub fn displayed(&self) -> [String; 2] {
         [
             format_time(self.remaining[0]),
@@ -778,9 +788,7 @@ mod tests {
         // because this test runs the whole sequence from the top.
         let opening = game.tap(Player::First);
         assert_eq!(opening, Tap::Started);
-        if opening.is_move() {
-            panic!("the opening tap is not a move");
-        }
+        assert!(!opening.is_move(), "the opening tap is not a move");
         assert_eq!(game.on_clock, Some(Player::Second));
         game.tick(2_000, settings.initial);
         assert_eq!(game.remaining[1], 18_000, "Second is the one thinking");

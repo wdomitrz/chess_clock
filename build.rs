@@ -43,6 +43,13 @@ const ICON_SIZES: [u32; 2] = [192, 512];
 /// original shipped: the page is Tailwind `gray-900` and the install splash
 /// should not flash a lighter grey behind it before the app paints.
 ///
+/// `short_name` was invented as "Chess", which is not this app. A chess clock
+/// times a game of chess; the home screen label said "Chess", so the icon that
+/// opens a *clock* claimed to open chess. The label is the whole of what a user
+/// sees once an app is installed, so it says what the app is: "Chess Clock". It
+/// fits: eleven characters, inside the twelve or so a launcher shows before it
+/// starts truncating.
+///
 /// See AGENTS.md: `theme_color` is the page background (`gray-900`),
 /// `#111827`, and `background_color` is the darker `#0b1220` the splash uses.
 /// A two-hash raw string, because the manifest is full of `#rrggbb` colours
@@ -50,7 +57,7 @@ const ICON_SIZES: [u32; 2] = [192, 512];
 const MANIFEST: &str = r##"{
   "id": "./",
   "name": "Chess Clock",
-  "short_name": "Chess",
+  "short_name": "Chess Clock",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

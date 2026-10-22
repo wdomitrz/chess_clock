@@ -702,7 +702,13 @@ fn the_committed_manifest_is_well_formed_and_relative() {
     let manifest: serde_json::Value =
         serde_json::from_str(json).expect("the manifest is valid JSON");
     assert_eq!(manifest["name"], "Chess Clock");
-    assert_eq!(manifest["short_name"], "Chess");
+    // The launcher label is the app's name, not a shorter name for a different
+    // thing: "Chess" would advertise a chess game and open a clock.
+    assert_eq!(manifest["short_name"], "Chess Clock");
+    assert_eq!(
+        manifest["short_name"], manifest["name"],
+        "one name: the launcher label is the app's name"
+    );
     assert_eq!(manifest["display"], "standalone");
     for key in ["id", "start_url", "scope"] {
         assert_eq!(manifest[key], "./", "{key} must be relative");

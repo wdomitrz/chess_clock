@@ -40,7 +40,12 @@ const SHELL: &[(&str, &str)] = &[
 /// The install icon sizes, in pixels, derived from `assets/icon.svg`.
 const ICON_SIZES: [u32; 2] = [192, 512];
 
-/// The manifest. The original's `manifest.json` carried a `name` and no
+/// The manifest. `short_name` is the launcher label — what a home screen shows
+/// under the icon — and it is the app's own name. It was invented as "Chess",
+/// which is not this app: a chess clock times a game of chess, and an icon
+/// labelled "Chess" that opens a clock advertises something else.
+///
+/// The original's `manifest.json` carried a `name` and no
 /// `short_name` at all — it had been removed in the commit before last — and no
 /// theme or background colour, so those are chosen here to match the UI the
 /// original shipped: the page is Tailwind `gray-900` and the install splash
@@ -60,7 +65,7 @@ const ICON_SIZES: [u32; 2] = [192, 512];
 /// URL and is unique per app.
 const MANIFEST: &str = r##"{
     "name": "Chess Clock",
-  "short_name": "Chess",
+  "short_name": "Chess Clock",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

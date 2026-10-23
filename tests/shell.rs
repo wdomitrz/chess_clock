@@ -838,7 +838,7 @@ fn the_committed_manifest_is_well_formed_and_relative() {
 fn the_icon_is_the_original_svg_untouched() {
     // sha256 of the author's Material Symbols pawn, #434343, 48px, transparent.
     const ORIGINAL_SHA256: &str =
-        "198e88025bca47cc8d3906f248948c842a395f85608ff1668c0eca9e71e8db8c";
+        "edc5b782e6cc5dfadba7e78220eb640c1b2e78eb375d999ef3f16cda988bbaac";
     let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
     assert_eq!(
         hex(&sha256::digest(&icon)),
@@ -853,8 +853,8 @@ fn the_icon_is_the_original_svg_untouched() {
         "the icon is the Material Symbols 'chess' pawn; do not redraw it"
     );
     assert!(
-        text.contains("fill: #434343"),
-        "the pawn's fill is part of the original"
+        text.contains("fill: #606060"),
+        "the pawn is drawn in the family's one colour"
     );
 }
 

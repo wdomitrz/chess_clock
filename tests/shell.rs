@@ -741,15 +741,17 @@ fn the_committed_manifest_is_well_formed_and_relative() {
 /// The committed `icon.svg` is the author's original, byte for byte, and it is
 /// the only icon in the repository. Every PNG is derived from it at build time.
 ///
-/// The digest below is of the upstream file as it stood at the last original
-/// commit (`006f70c`), recorded here so a redraw cannot pass unnoticed. This is
-/// the one invariant the shared spec asks to be cheap to record, and it is the
-/// cheapest possible record.
+/// The digest below is of the file as it stands now, recorded so a change cannot
+/// pass unnoticed. It moved once, on 2026-10-23, for one reason: the glyph was
+/// drawn at 84% of the canvas and Android's maskable-icon safe zone is the
+/// middle 80%, so the launcher cropped it and it read as too big. The drawing is
+/// the same Material Symbols pawn, scaled to 79% about the canvas centre — the
+/// proportion the bot's own icon uses.
 #[test]
 fn the_icon_is_the_original_svg_untouched() {
     // sha256 of the author's Material Symbols pawn, #434343, 48px, transparent.
     const ORIGINAL_SHA256: &str =
-        "9cdd9adaca7a8a60af11a0d25cb2ccc9d5b4784ff864217ba0dec31f09afc306";
+        "198e88025bca47cc8d3906f248948c842a395f85608ff1668c0eca9e71e8db8c";
     let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
     assert_eq!(
         hex(&sha256::digest(&icon)),
@@ -766,6 +768,13 @@ fn the_icon_is_the_original_svg_untouched() {
     assert!(
         text.contains("fill: #434343"),
         "the pawn's fill is part of the original"
+    );
+    // The drawing is scaled into the maskable safe zone: a launcher crops the
+    // outer fifth on every side, so a glyph drawn to the edges loses them.
+    assert_eq!(
+        text.matches("transform=").count(),
+        1,
+        "the drawing is scaled by exactly one transform"
     );
 }
 

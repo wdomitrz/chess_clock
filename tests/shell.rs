@@ -784,7 +784,9 @@ fn the_committed_manifest_is_well_formed_and_relative() {
     let manifest: serde_json::Value =
         serde_json::from_str(json).expect("the manifest is valid JSON");
     assert_eq!(manifest["name"], "Chess Clock");
-    assert_eq!(manifest["short_name"], "Chess");
+    // The launcher label is the app's name: "Chess" would advertise a chess game
+    // and open a clock, and once installed that label is all a user sees.
+    assert_eq!(manifest["short_name"], "Chess Clock");
     assert_eq!(manifest["display"], "standalone");
     for key in ["start_url", "scope"] {
         assert_eq!(manifest[key], "./", "{key} must be relative");
@@ -836,7 +838,7 @@ fn the_committed_manifest_is_well_formed_and_relative() {
 fn the_icon_is_the_original_svg_untouched() {
     // sha256 of the author's Material Symbols pawn, #434343, 48px, transparent.
     const ORIGINAL_SHA256: &str =
-        "9cdd9adaca7a8a60af11a0d25cb2ccc9d5b4784ff864217ba0dec31f09afc306";
+        "198e88025bca47cc8d3906f248948c842a395f85608ff1668c0eca9e71e8db8c";
     let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
     assert_eq!(
         hex(&sha256::digest(&icon)),

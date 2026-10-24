@@ -137,15 +137,17 @@ toolchain produce the same bytes.
 
 ## The icon
 
-`assets/icon.svg` is the author's original, committed **byte for byte** from
-the upstream PWA: a Material Symbols "chess" pawn, `#434343`, on a transparent
-48px field. It is never deleted, never redrawn, never replaced by a PNG. It is
-the source of truth, and the 192 and 512 install PNGs are derived from it at
-build time by `usvg` + `resvg` + `tiny-skia` — build output, in `dist/` only,
-never committed and never present in the source tree.
+`assets/icon.svg` is the author's drawing, committed from the upstream PWA: a
+Material Symbols "chess" pawn, on a transparent 48px field. It is never
+deleted, never redrawn, never replaced by a PNG. It is the source of truth,
+and the 192 and 512 install PNGs are derived from it at build time by `usvg` +
+`resvg` + `tiny-skia` — build output, in `dist/` only, never committed and
+never present in the source tree. The pawn's colour is the family's one icon
+colour, `#444444` — the upstream original carried `#434343`, an earlier
+release `#606060`, and the family settled on `#444444` on 2026-10-24.
 
-`tests/shell.rs` records the upstream file's SHA-256
-(`9cdd9adaca7a8a60af11a0d25cb2ccc9d5b4784ff864217ba0dec31f09afc306`) so a
+`tests/shell.rs` records the file's SHA-256, updated with the recolouring
+(`3adc0a01e985b97cc15b4f9929018f42ad1b42f70c972859f81ad4f116c6ca8a`), so a
 redraw cannot pass unnoticed, and asserts the SVG's provenance strings.
 
 The shell links the SVG directly (`<link rel="icon" href="icon.svg">` and

@@ -827,23 +827,26 @@ fn the_committed_manifest_is_well_formed_and_relative() {
     }
 }
 
-/// The committed `icon.svg` is the author's original, byte for byte, and it is
+/// The committed `icon.svg` is the author's drawing, byte for byte, and it is
 /// the only icon in the repository. Every PNG is derived from it at build time.
 ///
-/// The digest below is of the upstream file as it stood at the last original
-/// commit (`006f70c`), recorded here so a redraw cannot pass unnoticed. This is
-/// the one invariant the shared spec asks to be cheap to record, and it is the
-/// cheapest possible record.
+/// The digest was first recorded at the upstream original (`006f70c`) so a
+/// redraw cannot pass unnoticed. The drawing has since been deliberately
+/// recoloured, once: on 2026-10-24 the family's single icon colour moved from
+/// `#606060` to `#444444`, and the digest moved with the file. The pin is the
+/// mechanism working as intended — a red test, a visible diff, a reason.
 #[test]
 fn the_icon_is_the_original_svg_untouched() {
-    // sha256 of the author's Material Symbols pawn, #434343, 48px, transparent.
+    // sha256 of the author's Material Symbols pawn, recoloured to the family's
+    // #444444 (the upstream original was #434343), 48px, transparent.
     const ORIGINAL_SHA256: &str =
-        "198e88025bca47cc8d3906f248948c842a395f85608ff1668c0eca9e71e8db8c";
+        "3adc0a01e985b97cc15b4f9929018f42ad1b42f70c972859f81ad4f116c6ca8a";
     let icon = std::fs::read(root().join("assets/icon.svg")).expect("assets/icon.svg");
     assert_eq!(
         hex(&sha256::digest(&icon)),
         ORIGINAL_SHA256,
-        "assets/icon.svg must stay the author's original, byte for byte"
+        "assets/icon.svg is pinned; a change to it must update this digest \
+         deliberately: the SVG is the source every install PNG is derived from"
     );
 
     let text = String::from_utf8(icon).expect("the icon is text");
@@ -853,8 +856,8 @@ fn the_icon_is_the_original_svg_untouched() {
         "the icon is the Material Symbols 'chess' pawn; do not redraw it"
     );
     assert!(
-        text.contains("fill: #434343"),
-        "the pawn's fill is part of the original"
+        text.contains("fill: #444444"),
+        "the pawn is drawn in the family's one colour"
     );
 }
 

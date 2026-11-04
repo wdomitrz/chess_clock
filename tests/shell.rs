@@ -5,11 +5,12 @@
 //!
 //! Everything here reads committed files. `dist/` is build output and is
 //! gitignored, so the release gate — which exports the candidate tree — never
-//! has it, and cannot build it either: that needs the wasm target, a pinned
-//! `wasm-bindgen` CLI and the `--cfg=web_sys_unstable_apis` flag the Wake Lock
-//! API is behind. A test asserting on `dist/` would therefore run only in a
-//! developer's checkout, which is exactly where it is least likely to catch
-//! anything, so those assertions are gone rather than skipped.
+//! has it, and cannot build it either: that needs the wasm target, a
+//! `wasm-bindgen` CLI at the version `Cargo.lock` records and the
+//! `--cfg=web_sys_unstable_apis` flag the Wake Lock API is behind. A test
+//! asserting on `dist/` would therefore run only in a developer's checkout,
+//! which is exactly where it is least likely to catch anything, so those
+//! assertions are gone rather than skipped.
 //!
 //! What covers the built output is running the two build steps, in the order
 //! AGENTS.md gives them. `.github/workflows/build.yml` does exactly that on
@@ -1002,10 +1003,6 @@ fn the_crate_is_a_library_with_no_binary() {
         !manifest.contains("[[bin]]"),
         "chess_clock is a browser app: a binary would only invite a run step"
     );
-    assert!(
-        manifest.contains("wasm-bindgen = \"=0.2.128\""),
-        "the generator version must be pinned exactly"
-    );
     // The Wake Lock API is behind this cfg in web-sys, and it has to be
     // enabled for the wasm target only.
     assert!(
@@ -1378,68 +1375,49 @@ fn workflow(name: &str) -> Option<String> {
     std::fs::read_to_string(&path).ok()
 }
 
-/// The Pages deployment cannot drift from the crate it publishes.
+/// The generator version must be the lockfile's, and nothing may restate it.
 ///
-/// The deploy job installs its own `wasm-bindgen`, pinned to a literal in the
-/// YAML, and compares its digest against a second literal in the same file.
-/// `Cargo.toml` pins the same version the crate compiles against. Move the
-/// dependency and the workflow keeps building happily: it generates bindings
-/// for a runtime the page does not have, and the only symptom is a live site
-/// that fails at startup with "Chess Clock could not start" -- for every
-/// visitor, and only in the browser. So the two are asserted equal here rather
-/// than trusted to be edited together.
+/// `Cargo.toml` asks for `wasm-bindgen = "0.2"`; the exact version is decided by
+/// `Cargo.lock`, and it is written down in exactly one place because
+/// `wasm-bindgen-futures`, `js-sys` and `web-sys` each depend on one exact
+/// `wasm-bindgen`. The generator has to be that same version: a mismatched one
+/// emits bindings the runtime will not load, and the only symptom is a live site
+/// that fails at startup with "Chess Clock could not start" — for every visitor,
+/// and only in a browser.
+///
+/// So neither workflow may name a version. A literal there is a second copy of a
+/// fact the lock records, wrong from the next `cargo update` onward, and silent
+/// when it is. Read from the lock and there is nothing to keep in step.
 #[test]
-fn the_pages_build_generates_bindings_for_the_pinned_runtime() {
-    let Some(pages) = workflow("pages.yml") else {
-        return;
-    };
+fn both_workflows_take_the_generator_version_from_the_lockfile() {
     let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
-
-    // Read the pin as Cargo writes it: `wasm-bindgen = "=0.2.128"`, an exact
-    // requirement. A looser form ("0.2.128", "^0.2") would resolve to whatever
-    // is newest in the lockfile, and the workflow's literal would then be
-    // naming one arbitrary version of several -- so the exact form is
-    // required, and a manifest that stops using it fails here instead of
-    // producing a workflow that builds whatever happened to be current.
-    let expected = manifest
-        .lines()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix("wasm-bindgen")?;
-            let rest = rest.trim_start().strip_prefix('=')?;
-            Some(rest.trim().trim_matches('"').to_owned())
-        })
-        .unwrap_or_else(|| panic!("Cargo.toml pins no exact wasm-bindgen version"));
-
     assert!(
-        expected.starts_with('='),
-        "Cargo.toml must pin wasm-bindgen exactly ({expected:?}), so there is one version \
-         for the crate and one for the bindings generator",
+        manifest
+            .lines()
+            .any(|line| line.trim() == "wasm-bindgen = \"0.2\""),
+        "Cargo.toml must ask for `wasm-bindgen = \"0.2\"`; an exact pin here would be a second \
+         copy of the version the lockfile and the sibling crates already decide",
     );
-    let version = expected.trim_start_matches('=').trim_matches('"');
 
-    // The version has to reach the job that generates the bindings, as the
-    // `version=` it installs -- not merely somewhere in the file, where a
-    // mention in a comment would satisfy this and the job would still install
-    // whatever else it found. Two spellings are accepted, because `build.yml`
-    // sets it in `env:` and reads it back as a shell variable, and a literal
-    // is equally correct: what is rejected is a job that names neither.
-    let literal = format!("version=\"{version}\"");
-    let indirect = "version=\"$WASM_BINDGEN_VERSION\"";
-    assert!(
-        pages.contains(&literal) || pages.contains(indirect),
-        "pages.yml must install wasm-bindgen {version} (`{literal}` or `{indirect}`); it cannot \
-         drift from the Cargo.toml pin, or the site fails to start in the browser and nowhere else",
-    );
-    // A version passed through `env:` is only a single source of truth if the
-    // variable is actually declared at the same literal value. An unset
-    // variable expands to nothing, and the job would install the empty string
-    // -- which passes every check here and publishes bindings for no runtime.
-    if pages.contains(indirect) {
-        let declared = format!("WASM_BINDGEN_VERSION: {version}");
+    for name in ["build.yml", "pages.yml"] {
+        let Some(text) = workflow(name) else {
+            panic!("{name} must exist");
+        };
         assert!(
-            pages.contains(&declared),
-            "pages.yml installs $WASM_BINDGEN_VERSION but never declares it as {version}; an \
-             undeclared variable expands to nothing and the generator step installs nothing",
+            text.contains("version=\"$(awk"),
+            "{name} must derive the generator version from Cargo.lock rather than naming one",
+        );
+        assert!(
+            text.contains("Cargo.lock"),
+            "{name} must read Cargo.lock for the generator version",
+        );
+        assert!(
+            !text.contains("WASM_BINDGEN_VERSION"),
+            "{name} must not declare a generator version of its own; Cargo.lock has it",
+        );
+        assert!(
+            !text.contains("version=\"0.2"),
+            "{name} must not name a generator version literal",
         );
     }
 }

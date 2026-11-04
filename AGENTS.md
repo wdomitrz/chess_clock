@@ -52,10 +52,13 @@ application, so the build is the whole story and the crate is a library.
 
 `wasm-bindgen` installs to `~/.cargo/bin`, on `PATH` in a normal login shell;
 in a bare or non-login shell call it by absolute path
-(`~/.cargo/bin/wasm-bindgen`). The version is pinned to `=0.2.128` in
-`Cargo.toml` and must match the CLI exactly — a mismatched generator produces
-bindings the runtime will not load, and the page then fails to start with
-"Chess Clock could not start". No npm or JS build tool is needed. A tiny
+(`~/.cargo/bin/wasm-bindgen`). `Cargo.toml` asks for `wasm-bindgen = "0.2"` and
+`Cargo.lock` records the one version that means, because `wasm-bindgen-futures`,
+`js-sys` and `web-sys` each depend on an exact `wasm-bindgen`. The CLI must be
+that version — a mismatched generator produces bindings the runtime will not
+load, and the page then fails to start with "Chess Clock could not start". Both
+workflows read the version from `Cargo.lock` instead of naming it, so there is
+nothing to keep in step. No npm or JS build tool is needed. A tiny
 dynamic-import loader in `ui.html`, the small service-worker cache/lifecycle
 file, and the generated wasm-bindgen bindings are the *only* JavaScript in the
 app: there is no handwritten JavaScript application and no raw-pointer ABI.
@@ -63,7 +66,7 @@ app: there is no handwritten JavaScript application and no raw-pointer ABI.
 ### `RUSTFLAGS` and the Wake Lock
 
 The Screen Wake Lock API is what keeps the screen on with the phone lying flat
-between two players, and in `web-sys` 0.3.105 **all of it is behind
+between two players, and in `web-sys` 0.3 **all of it is behind
 `#[cfg(web_sys_unstable_apis)]`** — not merely feature-gated:
 
 | item | feature needed | also behind the cfg |
@@ -281,7 +284,7 @@ immediately if the document is already parsed, or on `DOMContentLoaded` if it
 is not. `tests/shell.rs` asserts the ordering statically — the start function
 must not call `mount()` — because that is the one property a unit test *can*
 check. Note that `Document::readyState` is a plain `String` in web-sys
-0.3.105; there is no `ReadyState` enum and no feature to enable.
+0.3; there is no `ReadyState` enum and no feature to enable.
 
 **`Rc::new_cyclic` cannot give you a strong self-reference.** Its closure runs
 *before* the `Rc` exists, so `weak.upgrade()` inside it returns `None` by

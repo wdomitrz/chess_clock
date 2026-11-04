@@ -26,7 +26,7 @@
 //!   id to clear when a game ends and no way for a stopped game to keep a
 //!   timer running. The original's 100 ms `setInterval` is kept as the period.
 //! * **`window().navigator()` and `navigator.wake_lock()` are not optional** in
-//!   `web-sys` 0.3.105, however much the browser support is optional. Wrapping
+//!   `web-sys` 0.3, however much the browser support is optional. Wrapping
 //!   them in an `Option` does not compile, and pretending otherwise is how a
 //!   rewrite ends up with an unreachable "not supported" branch.
 //!
@@ -173,7 +173,7 @@ pub fn start_when_ready() {
         report_start_failure("no document");
         return;
     };
-    // `Document::readyState` is not a `ReadyState` enum in web-sys 0.3.105 —
+    // `Document::readyState` is not a `ReadyState` enum in web-sys 0.3 —
     // the property is a plain string, and there is no `ReadyState` feature to
     // enable. Compared as a string, which is also what the spec defines.
     if document.ready_state() == "loading" {

@@ -101,7 +101,7 @@ fn main() {
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.starts_with("wasm") {
         // The Screen Wake Lock API is behind `web_sys_unstable_apis` in
-        // `web-sys` 0.3.105, and the whole of it: `Navigator::wake_lock`,
+        // `web-sys` 0.3, and the whole of it: `Navigator::wake_lock`,
         // `WakeLock::request`, `WakeLockSentinel` and `WakeLockType` each carry
         // the cfg. Enabling the features is necessary and not sufficient.
         //
